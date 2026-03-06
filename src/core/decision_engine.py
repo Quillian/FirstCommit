@@ -25,6 +25,8 @@ class MarketInputs:
     rank_in_book: int
     local_depth: int
     inventory_age_sec: int
+    marketplace_bps: int | None = None
+    royalties_bps: int | None = None
 
 
 class DecisionEngine:
@@ -32,6 +34,16 @@ class DecisionEngine:
         self.cfg = cfg
 
     def evaluate(self, inputs: MarketInputs, inventory_count: int, reconciliation_healthy: bool, wallet_sufficient: bool) -> dict[str, Any]:
+        if not inputs.recent_sales or not inputs.floor_asks or not inputs.floor_bids:
+            return {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "collection_slug": inputs.collection_slug,
+                "action": "DO_NOTHING",
+                "rationale": "blocked_market_data_missing",
+                "risk_flags": ["market_data_missing"],
+                "next_check_sec": self.cfg["throttling"]["scheduler_cycle_sec"],
+            }
+
         regime = infer_regime(inputs.sales_velocity, inputs.short_drift, inputs.liquidity_score)
         fair_value = compute_fair_value(
             inputs.recent_sales,
@@ -56,12 +68,19 @@ class DecisionEngine:
             drift=inputs.short_drift,
             fill_decay=max(0.0, 0.08 - (fill.fill_probability * 0.05)),
         )
-        bid_price = min(fair_value * 0.98, self.cfg["size_controls"]["bid_size_eth"])
+
+        target_bid = min(fair_value * (1 - self.cfg["pricing"]["edge_buffer_pct"]), max(inputs.floor_bids))
+        bid_price = min(target_bid, self.cfg["pricing"]["max_bid_price_eth"])
+        if bid_price > self.cfg["size_controls"]["bid_size_eth"]:
+            bid_price = self.cfg["size_controls"]["bid_size_eth"]
+
+        marketplace_bps = inputs.marketplace_bps if inputs.marketplace_bps is not None else self.cfg["fees"]["default_marketplace_bps"]
+        royalties_bps = inputs.royalties_bps if inputs.royalties_bps is not None else self.cfg["fees"]["default_royalties_bps"]
         net = expected_net_pnl(
             bid_price=bid_price,
             expected_exit_price=expected_exit,
-            marketplace_bps=self.cfg["fees"]["marketplace_bps"],
-            royalties_bps=self.cfg["fees"]["royalties_bps"],
+            marketplace_bps=marketplace_bps,
+            royalties_bps=royalties_bps,
             gas_eth=self.cfg["gas"]["per_trade_eth"],
         )
         risk_ctx = RiskContext(
@@ -90,4 +109,5 @@ class DecisionEngine:
             "risk_flags": flags,
             "next_check_sec": self.cfg["throttling"]["scheduler_cycle_sec"],
             "bid_price": round(max(0.0, bid_price), 6),
+            "fees_bps": {"marketplace": marketplace_bps, "royalties": royalties_bps},
         }

@@ -12,7 +12,9 @@
     "stream_url": "wss://stream.openseabeta.com/socket",
     "api_key_env": "OPENSEA_API_KEY",
     "request_timeout_sec": 10,
-    "retry_attempts": 3
+    "retry_attempts": 3,
+    "chain": "ethereum",
+    "protocol": "seaport"
   },
   "collections": {
     "allowlist": ["doodles-official"],
@@ -23,9 +25,15 @@
     "bid_size_eth": 0.01,
     "max_daily_spend_eth": 0.03
   },
+  "pricing": {
+    "edge_buffer_pct": 0.02,
+    "max_bid_price_eth": 0.02,
+    "velocity_norm_denominator": 100
+  },
   "fees": {
-    "marketplace_bps": 250,
-    "royalties_bps": 500
+    "use_collection_fees": true,
+    "default_marketplace_bps": 250,
+    "default_royalties_bps": 500
   },
   "gas": {
     "per_trade_eth": 0.0008
