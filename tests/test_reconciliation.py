@@ -45,3 +45,41 @@ def test_health_unhealthy_when_order_state_mismatch(tmp_path) -> None:
     status = reconciler.health()
 
     assert status.healthy is False
+
+
+def test_health_unhealthy_when_order_reconciliation_fails(tmp_path, monkeypatch) -> None:
+    storage = _storage(tmp_path)
+    reconciler = Reconciler(storage)
+
+    def _fail_upsert(*args, **kwargs):
+        raise RuntimeError("db write failed")
+
+    monkeypatch.setattr(storage, "upsert_order", _fail_upsert)
+
+    reconciler.order_status_reconciliation([
+        {"order_hash": "0x1", "status": "OPEN"},
+    ])
+    reconciler.inventory_reconciliation([])
+
+    status = reconciler.health()
+
+    assert status.healthy is False
+
+
+def test_health_unhealthy_when_inventory_reconciliation_fails(tmp_path, monkeypatch) -> None:
+    storage = _storage(tmp_path)
+    reconciler = Reconciler(storage)
+
+    def _fail_replace(*args, **kwargs):
+        raise RuntimeError("inventory write failed")
+
+    monkeypatch.setattr(storage, "replace_inventory", _fail_replace)
+
+    reconciler.order_status_reconciliation([])
+    reconciler.inventory_reconciliation([
+        {"token_key": "collection:1", "collection": "collection", "token_id": "1"},
+    ])
+
+    status = reconciler.health()
+
+    assert status.healthy is False
