@@ -45,10 +45,14 @@ def test_endpoint_paths_constructed_from_chain_protocol(tmp_path) -> None:
     manager.cancel_order("0xhash")
     client.fulfill_listing({"listing": {}})
     client.fulfill_offer({"offer": {}})
+    client.fulfill_listing({"listing": {}}, chain="ethereum", protocol="seaport")
+    client.fulfill_offer({"offer": {}}, chain="ethereum", protocol="seaport")
 
-    # paper mode only calls fulfillment endpoints directly from client
+    # support both generic and chain/protocol-aware fulfillment endpoints
     assert ("POST", "/listings/fulfillment_data", {"listing": {}}) in client.calls
     assert ("POST", "/offers/fulfillment_data", {"offer": {}}) in client.calls
+    assert ("POST", "/orders/ethereum/seaport/listings/fulfillment_data", {"listing": {}}) in client.calls
+    assert ("POST", "/orders/ethereum/seaport/offers/fulfillment_data", {"offer": {}}) in client.calls
 
 
 def test_live_create_paths(tmp_path) -> None:

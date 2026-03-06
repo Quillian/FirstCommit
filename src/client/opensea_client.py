@@ -88,10 +88,14 @@ class OpenSeaClient:
     def cancel_order(self, chain: str, protocol: str, order_hash: str) -> Dict[str, Any]:
         return self._request("POST", f"/orders/{chain}/{protocol}/{order_hash}/cancel")
 
-    def fulfill_listing(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def fulfill_listing(self, payload: Dict[str, Any], chain: str | None = None, protocol: str | None = None) -> Dict[str, Any]:
+        if chain and protocol:
+            return self._request("POST", f"/orders/{chain}/{protocol}/listings/fulfillment_data", payload)
         return self._request("POST", "/listings/fulfillment_data", payload)
 
-    def fulfill_offer(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def fulfill_offer(self, payload: Dict[str, Any], chain: str | None = None, protocol: str | None = None) -> Dict[str, Any]:
+        if chain and protocol:
+            return self._request("POST", f"/orders/{chain}/{protocol}/offers/fulfillment_data", payload)
         return self._request("POST", "/offers/fulfillment_data", payload)
 
     def stream_integration_path(self) -> str:
