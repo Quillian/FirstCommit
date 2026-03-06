@@ -20,6 +20,8 @@ class Reconciler:
         self._inventory_reconciled = False
         self._expected_open_orders = 0
         self._expected_inventory = 0
+        self._orders_failed = False
+        self._inventory_failed = False
         self._last_error: str | None = None
 
     def order_status_reconciliation(self, api_orders: list[dict[str, Any]]) -> int:
@@ -36,9 +38,11 @@ class Reconciler:
                 1 for order in api_orders if order.get("status", "UNKNOWN") in {"OPEN", "PENDING"}
             )
             self._orders_reconciled = True
+            self._orders_failed = False
             self._last_error = None
         except Exception as exc:
-            self._orders_reconciled = True
+            self._orders_reconciled = False
+            self._orders_failed = True
             self._expected_open_orders = -1
             self._last_error = str(exc)
         return updated
@@ -48,9 +52,11 @@ class Reconciler:
             self.storage.replace_inventory(wallet_assets)
             self._expected_inventory = len(wallet_assets)
             self._inventory_reconciled = True
+            self._inventory_failed = False
             self._last_error = None
         except Exception as exc:
-            self._inventory_reconciled = True
+            self._inventory_reconciled = False
+            self._inventory_failed = True
             self._expected_inventory = -1
             self._last_error = str(exc)
         return len(wallet_assets)
@@ -60,7 +66,8 @@ class Reconciler:
         inv = self.storage.count_inventory()
         orders_in_sync = self._orders_reconciled and open_orders == self._expected_open_orders
         inventory_in_sync = self._inventory_reconciled and inv == self._expected_inventory
-        healthy = self._last_error is None and orders_in_sync and inventory_in_sync
+        has_failure_signal = self._orders_failed or self._inventory_failed or self._last_error is not None
+        healthy = not has_failure_signal and orders_in_sync and inventory_in_sync
         self.storage.log_reconciliation(
             {
                 "healthy": healthy,
@@ -68,6 +75,8 @@ class Reconciler:
                 "inventory": inv,
                 "orders_reconciled": self._orders_reconciled,
                 "inventory_reconciled": self._inventory_reconciled,
+                "orders_failed": self._orders_failed,
+                "inventory_failed": self._inventory_failed,
                 "orders_in_sync": orders_in_sync,
                 "inventory_in_sync": inventory_in_sync,
                 "last_error": self._last_error,
