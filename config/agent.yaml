@@ -1,0 +1,52 @@
+{
+  "mode": "paper",
+  "write_enabled": false,
+  "dry_run": true,
+  "wallet": {
+    "address_env": "WALLET_ADDRESS",
+    "private_key_env": "PRIVATE_KEY",
+    "min_native_balance_eth": 0.02
+  },
+  "opensea": {
+    "api_base_url": "https://api.opensea.io/api/v2",
+    "stream_url": "wss://stream.openseabeta.com/socket",
+    "api_key_env": "OPENSEA_API_KEY",
+    "request_timeout_sec": 10,
+    "retry_attempts": 3
+  },
+  "collections": {
+    "allowlist": ["doodles-official"],
+    "require_verified": true
+  },
+  "size_controls": {
+    "max_open_inventory": 1,
+    "bid_size_eth": 0.01,
+    "max_daily_spend_eth": 0.03
+  },
+  "fees": {
+    "marketplace_bps": 250,
+    "royalties_bps": 500
+  },
+  "gas": {
+    "per_trade_eth": 0.0008
+  },
+  "risk": {
+    "min_liquidity_score": 0.55,
+    "staircase_drop_pct": 0.07,
+    "unhealthy_error_rate": 0.15,
+    "pause_after_consecutive_errors": 5
+  },
+  "repricing": {
+    "material_change_pct": 0.015,
+    "cooldown_sec": 120,
+    "max_reprices_per_hour": 3
+  },
+  "throttling": {
+    "max_requests_per_minute": 60,
+    "scheduler_cycle_sec": 30
+  },
+  "logging": {
+    "json": true,
+    "level": "INFO"
+  }
+}
