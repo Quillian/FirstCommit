@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections import deque
+from decimal import Decimal
 from typing import Any
+from urllib.request import Request, urlopen
 
+from src.client.opensea_client import OpenSeaClient
 from src.core.decision_engine import DecisionEngine, MarketInputs
 from src.core.reconciliation import Reconciler
 from src.execution.order_manager import OrderManager
@@ -43,12 +47,14 @@ class LiveRunner:
     def __init__(
         self,
         cfg: dict[str, Any],
+        client: OpenSeaClient,
         decision_engine: DecisionEngine,
         order_manager: OrderManager,
         storage: Storage,
         reconciler: Reconciler,
     ) -> None:
         self.cfg = cfg
+        self.client = client
         self.decision_engine = decision_engine
         self.order_manager = order_manager
         self.storage = storage
@@ -60,11 +66,60 @@ class LiveRunner:
         )
 
     def check_wallet_balance(self) -> bool:
-        # Placeholder deterministic check for tiny-live v1; replace with RPC call in deployment.
-        bal = float(os.getenv("SIM_WALLET_BALANCE_ETH", "1.0"))
-        return bal >= float(self.cfg["wallet"]["min_native_balance_eth"])
+        rpc = os.getenv("RPC_URL")
+        wallet = os.getenv(self.cfg["wallet"]["address_env"], "")
+        if not rpc or not wallet:
+            return False
+
+        req = Request(
+            rpc,
+            method="POST",
+            data=json.dumps(
+                {"jsonrpc": "2.0", "method": "eth_getBalance", "params": [wallet, "latest"], "id": 1}
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=10) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        wei = int(payload.get("result", "0x0"), 16)
+        eth = float(Decimal(wei) / Decimal(10**18))
+        return eth >= float(self.cfg["wallet"]["min_native_balance_eth"])
+
+    @staticmethod
+    def _extract_order_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = payload.get("orders") or payload.get("listings") or payload.get("offers") or []
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            order_hash = row.get("order_hash") or row.get("orderHash")
+            status = row.get("status") or ("OPEN" if row.get("is_valid", True) else "CANCELLED")
+            if order_hash:
+                normalized.append({"order_hash": order_hash, "status": str(status).upper(), **row})
+        return normalized
+
+    @staticmethod
+    def _extract_inventory_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        assets = payload.get("nfts") or payload.get("assets") or []
+        normalized: list[dict[str, Any]] = []
+        for asset in assets:
+            contract = asset.get("contract") or asset.get("contract_address") or "unknown"
+            token_id = str(asset.get("identifier") or asset.get("token_id") or "")
+            normalized.append({"token_key": f"{contract}:{token_id}", "collection": contract, "token_id": token_id, **asset})
+        return normalized
+
+    def reconcile_account_state(self) -> None:
+        slug = self.cfg["collections"]["allowlist"][0]
+        listings = self.client.get_all_listings_by_collection(slug)
+        offers = self.client.get_all_offers_by_collection(slug)
+        orders = self._extract_order_rows(listings) + self._extract_order_rows(offers)
+        self.reconciler.order_status_reconciliation(orders)
+
+        wallet = os.getenv(self.cfg["wallet"]["address_env"], "")
+        if wallet:
+            inv_payload = self.client.get_account_nfts(self.cfg["opensea"]["chain"], wallet)
+            self.reconciler.inventory_reconciliation(self._extract_inventory_rows(inv_payload))
 
     def cycle(self, market: MarketInputs) -> dict[str, Any]:
+        self.reconcile_account_state()
         wallet_ok = self.check_wallet_balance()
         reconciliation_healthy = self.reconciler.health().healthy
         decision = self.decision_engine.evaluate(

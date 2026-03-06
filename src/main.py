@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from typing import Any
 
 from src.client.auth import AuthConfig, OpenSeaAuth
 from src.client.opensea_client import OpenSeaClient
@@ -22,20 +23,62 @@ def load_config(path: str) -> dict:
         return json.load(f)
 
 
-def sample_market(slug: str) -> MarketInputs:
+def _to_float_list(values: list[Any], key: str | None = None) -> list[float]:
+    out: list[float] = []
+    for value in values:
+        raw = value if key is None else value.get(key)
+        try:
+            out.append(float(raw))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _extract_fee_bps(collection_details: dict[str, Any]) -> tuple[int | None, int | None]:
+    fees = collection_details.get("fees") or {}
+    opensea_fees = fees.get("opensea_fees") or {}
+    seller_fees = fees.get("seller_fees") or {}
+    marketplace = sum(int(float(item.get("fee", 0)) * 100) for item in opensea_fees.values()) if opensea_fees else None
+    royalties = sum(int(float(item.get("fee", 0)) * 100) for item in seller_fees.values()) if seller_fees else None
+    return marketplace, royalties
+
+
+def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -> MarketInputs:
+    details = client.get_collection_details(slug)
+    stats = client.get_collection_stats(slug)
+    events = client.get_events_by_collection(slug)
+    best_listings = client.get_best_listings_by_collection(slug)
+    all_listings = client.get_all_listings_by_collection(slug)
+    all_offers = client.get_all_offers_by_collection(slug)
+
+    sales = _to_float_list(events.get("asset_events", []), "payment_quantity")
+    asks = _to_float_list(
+        best_listings.get("listings", []) + all_listings.get("listings", []),
+        "current_price",
+    )
+    bids = _to_float_list(all_offers.get("offers", []), "price")
+
+    volume = float((stats.get("total") or {}).get("volume", 0.0))
+    count = float((stats.get("total") or {}).get("count", 0.0))
+    velocity = min(1.0, count / max(cfg["pricing"]["velocity_norm_denominator"], 1))
+    liquidity = min(1.0, (volume / max(count, 1.0)) / max(asks[0] if asks else 1.0, 1e-9)) if count > 0 else 0.0
+
+    marketplace_bps, royalties_bps = _extract_fee_bps(details)
     return MarketInputs(
         collection_slug=slug,
-        verified=True,
-        recent_sales=[0.015, 0.0145, 0.0148, 0.0151, 0.0152],
-        floor_asks=[0.016, 0.0161, 0.0163, 0.0165],
-        floor_bids=[0.0138, 0.0137, 0.0135],
-        short_drift=0.003,
-        sales_velocity=0.6,
-        liquidity_score=0.7,
-        rank_in_ask_ladder=2,
-        rank_in_book=2,
-        local_depth=8,
+        verified=bool(details.get("collection", {}).get("safelist_status") in {"verified", "approved"}),
+        recent_sales=sales,
+        floor_asks=asks,
+        floor_bids=bids,
+        short_drift=0.0,
+        sales_velocity=velocity,
+        liquidity_score=liquidity,
+        rank_in_ask_ladder=1,
+        rank_in_book=1,
+        local_depth=len(asks),
         inventory_age_sec=180,
+        marketplace_bps=marketplace_bps,
+        royalties_bps=royalties_bps,
     )
 
 
@@ -56,15 +99,20 @@ def main() -> None:
         retry_attempts=cfg["opensea"]["retry_attempts"],
     )
     signer = Signer(private_key=os.getenv(cfg["wallet"]["private_key_env"]))
-    order_manager = OrderManager(client, signer, storage, ExecutionConfig(cfg["mode"], cfg["dry_run"], cfg["write_enabled"]))
+    order_manager = OrderManager(
+        client,
+        signer,
+        storage,
+        ExecutionConfig(cfg["mode"], cfg["dry_run"], cfg["write_enabled"], cfg["opensea"]["chain"], cfg["opensea"]["protocol"]),
+    )
     reconciler = Reconciler(storage)
     decision_engine = DecisionEngine(cfg)
 
-    market = sample_market(cfg["collections"]["allowlist"][0])
+    market = market_from_opensea(client, cfg["collections"]["allowlist"][0], cfg)
     if cfg["mode"] == "paper":
         PaperRunner(cfg, decision_engine, order_manager, storage, reconciler).run_once(market, wallet_sufficient=True)
     else:
-        LiveRunner(cfg, decision_engine, order_manager, storage, reconciler).cycle(market)
+        LiveRunner(cfg, client, decision_engine, order_manager, storage, reconciler).cycle(market)
 
 
 if __name__ == "__main__":

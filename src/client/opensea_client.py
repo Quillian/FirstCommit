@@ -5,6 +5,7 @@ import logging
 import time
 from typing import Any, Dict, Optional
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from src.client.auth import OpenSeaAuth
@@ -28,15 +29,25 @@ class OpenSeaClient:
         self.timeout_sec = timeout_sec
         self.retry_attempts = retry_attempts
 
-    def _request(self, method: str, path: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        payload: Optional[Dict[str, Any]] = None,
+        query: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         self.rate_limiter.wait()
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
+        query_string = f"?{urlencode(query)}" if query else ""
+        url = f"{self.base_url}{path}{query_string}"
         last_error: Exception | None = None
         for attempt in range(1, self.retry_attempts + 1):
             try:
-                req = Request(f"{self.base_url}{path}", data=body, method=method)
+                req = Request(url, data=body, method=method)
                 for k, v in self.auth.headers().items():
                     req.add_header(k, v)
+                if payload is not None:
+                    req.add_header("Content-Type", "application/json")
                 with urlopen(req, timeout=self.timeout_sec) as resp:
                     raw = resp.read().decode("utf-8")
                     return json.loads(raw) if raw else {}
@@ -65,20 +76,23 @@ class OpenSeaClient:
     def get_all_offers_by_collection(self, slug: str) -> Dict[str, Any]:
         return self._request("GET", f"/offers/collection/{slug}/all")
 
-    def create_item_offer(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("POST", "/offers", payload)
+    def get_account_nfts(self, chain: str, address: str) -> Dict[str, Any]:
+        return self._request("GET", f"/chain/{chain}/account/{address}/nfts")
 
-    def create_listing(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("POST", "/listings", payload)
+    def create_item_offer(self, chain: str, protocol: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("POST", f"/orders/{chain}/{protocol}/offers", payload)
 
-    def cancel_order(self, order_hash: str) -> Dict[str, Any]:
-        return self._request("POST", f"/orders/{order_hash}/cancel")
+    def create_listing(self, chain: str, protocol: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._request("POST", f"/orders/{chain}/{protocol}/listings", payload)
+
+    def cancel_order(self, chain: str, protocol: str, order_hash: str) -> Dict[str, Any]:
+        return self._request("POST", f"/orders/{chain}/{protocol}/{order_hash}/cancel")
 
     def fulfill_listing(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("POST", "/fulfillment_data/listings", payload)
+        return self._request("POST", "/listings/fulfillment_data", payload)
 
     def fulfill_offer(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        return self._request("POST", "/fulfillment_data/offers", payload)
+        return self._request("POST", "/offers/fulfillment_data", payload)
 
     def stream_integration_path(self) -> str:
         return "Use configured stream websocket URL with auth headers for future event-driven fills/listing deltas"
