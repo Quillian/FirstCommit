@@ -58,8 +58,12 @@ class OrderManager:
         price_wei = self._wei(float(payload["price_eth"]))
         collection = str(payload.get("collection", ""))
         token_id = str(payload.get("token_id", "0"))
-        collection_contract = str(payload.get("collection_contract", "0x0000000000000000000000000000000000000000"))
-        wrapped_native = str(payload.get("payment_token", "0x0000000000000000000000000000000000000000"))
+        collection_contract = str(payload.get("collection_contract", "")).strip()
+        wrapped_native = str(payload.get("payment_token", "")).strip()
+        if not collection_contract or collection_contract == "0x0000000000000000000000000000000000000000":
+            raise ValueError("invalid_order_payload_collection_contract")
+        if not wrapped_native or wrapped_native == "0x0000000000000000000000000000000000000000":
+            raise ValueError("invalid_order_payload_payment_token")
 
         offer_item = {
             "itemType": 1,
@@ -117,17 +121,34 @@ class OrderManager:
             },
         }
 
-    def build_offer_payload(self, collection_slug: str, price_eth: float, wallet: str) -> dict[str, object]:
+    def build_offer_payload(
+        self,
+        collection_slug: str,
+        price_eth: float,
+        wallet: str,
+        collection_contract: str,
+        payment_token: str,
+    ) -> dict[str, object]:
         return self._seaport_order_shell(
             "offer",
             wallet,
             {
                 "collection": collection_slug,
                 "price_eth": price_eth,
+                "collection_contract": collection_contract,
+                "payment_token": payment_token,
             },
         )
 
-    def build_listing_payload(self, token_id: str, collection_slug: str, price_eth: float, wallet: str) -> dict[str, object]:
+    def build_listing_payload(
+        self,
+        token_id: str,
+        collection_slug: str,
+        price_eth: float,
+        wallet: str,
+        collection_contract: str,
+        payment_token: str,
+    ) -> dict[str, object]:
         return self._seaport_order_shell(
             "listing",
             wallet,
@@ -135,6 +156,8 @@ class OrderManager:
                 "token_id": token_id,
                 "collection": collection_slug,
                 "price_eth": price_eth,
+                "collection_contract": collection_contract,
+                "payment_token": payment_token,
             },
         )
 
