@@ -60,12 +60,6 @@ class Signer:
             "verifyingContract": payload.get("seaport_contract", "0x0000000000000068F116a894984e2DB1123eB395"),
         }
         types = {
-            "EIP712Domain": [
-                {"name": "name", "type": "string"},
-                {"name": "version", "type": "string"},
-                {"name": "chainId", "type": "uint256"},
-                {"name": "verifyingContract", "type": "address"},
-            ],
             "OfferItem": [
                 {"name": "itemType", "type": "uint8"},
                 {"name": "token", "type": "address"},
