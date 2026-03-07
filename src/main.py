@@ -23,25 +23,70 @@ def load_config(path: str) -> dict:
         return json.load(f)
 
 
+def _to_float(raw: Any) -> float | None:
+    if isinstance(raw, dict):
+        current = raw.get("current")
+        if isinstance(current, dict):
+            raw = current
+        for candidate in (
+            raw.get("eth"),
+            raw.get("quantity"),
+            raw.get("value"),
+            raw.get("amount"),
+        ):
+            if candidate is not None:
+                raw = candidate
+                break
+        if isinstance(raw, (int, float)):
+            return float(raw)
+
+        decimals = raw.get("decimals") if isinstance(raw, dict) else None
+        value = raw.get("value") if isinstance(raw, dict) else None
+        if value is not None:
+            try:
+                as_float = float(value)
+                if isinstance(decimals, int) and decimals >= 0:
+                    return as_float / (10 ** decimals)
+                return as_float
+            except (TypeError, ValueError):
+                return None
+
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _to_float_list(values: list[Any], key: str | None = None) -> list[float]:
     out: list[float] = []
     for value in values:
         raw = value if key is None else value.get(key)
-        if isinstance(raw, dict):
-            raw = raw.get("eth") or raw.get("quantity")
-        try:
-            out.append(float(raw))
-        except (TypeError, ValueError):
+        parsed = _to_float(raw)
+        if parsed is None:
             continue
+        out.append(parsed)
     return out
 
 
 def _extract_fee_bps(collection_details: dict[str, Any]) -> tuple[int | None, int | None]:
     fees = collection_details.get("fees") or {}
-    opensea_fees = fees.get("opensea_fees") or {}
-    seller_fees = fees.get("seller_fees") or {}
-    marketplace = sum(int(float(item.get("fee", 0)) * 100) for item in opensea_fees.values()) if opensea_fees else None
-    royalties = sum(int(float(item.get("fee", 0)) * 100) for item in seller_fees.values()) if seller_fees else None
+    opensea_fees = fees.get("opensea_fees") or []
+    seller_fees = fees.get("seller_fees") or []
+
+    if isinstance(opensea_fees, dict):
+        opensea_values = opensea_fees.values()
+    else:
+        opensea_values = opensea_fees
+
+    if isinstance(seller_fees, dict):
+        seller_values = seller_fees.values()
+    else:
+        seller_values = seller_fees
+
+    marketplace_items = [item for item in opensea_values if isinstance(item, dict)]
+    royalty_items = [item for item in seller_values if isinstance(item, dict)]
+    marketplace = sum(int(float(item.get("fee", 0)) * 100) for item in marketplace_items) if marketplace_items else None
+    royalties = sum(int(float(item.get("fee", 0)) * 100) for item in royalty_items) if royalty_items else None
     return marketplace, royalties
 
 
@@ -49,7 +94,10 @@ def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str
     fees = collection_details.get("fees") or {}
     recipients: list[dict[str, Any]] = []
     for bucket in (fees.get("opensea_fees") or {}, fees.get("seller_fees") or {}):
-        for item in bucket.values():
+        rows = bucket.values() if isinstance(bucket, dict) else bucket
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
             recipient = str(item.get("recipient") or item.get("address") or "").strip()
             if not recipient:
                 continue
@@ -113,15 +161,21 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
     all_listings = client.get_all_listings_by_collection(slug)
     all_offers = client.get_all_offers_by_collection(slug)
 
-    sales = _to_float_list(events.get("asset_events", []), "payment_quantity")
+    sales_payload = events.get("asset_events", [])
+    sales = _to_float_list(sales_payload, "payment_quantity")
+    if not sales:
+        sales = _to_float_list(sales_payload, "payment")
     asks = _to_float_list(
         best_listings.get("listings", []) + all_listings.get("listings", []),
         "current_price",
     )
+    if not asks:
+        asks = _to_float_list(best_listings.get("listings", []) + all_listings.get("listings", []), "price")
     bids = _to_float_list(all_offers.get("offers", []), "price")
 
     volume = float((stats.get("total") or {}).get("volume", 0.0))
-    count = float((stats.get("total") or {}).get("count", 0.0))
+    total_stats = stats.get("total") or {}
+    count = float(total_stats.get("count", total_stats.get("sales", 0.0)))
     velocity = min(1.0, count / max(cfg["pricing"]["velocity_norm_denominator"], 1))
     liquidity = min(1.0, (volume / max(count, 1.0)) / max(asks[0] if asks else 1.0, 1e-9)) if count > 0 else 0.0
 
@@ -130,7 +184,10 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
     target_collection_contract, target_token_id = _extract_asset_identity(best_listings, all_listings, all_offers, events)
     return MarketInputs(
         collection_slug=slug,
-        verified=bool(details.get("collection", {}).get("safelist_status") in {"verified", "approved"}),
+        verified=bool(
+            (details.get("collection", {}).get("safelist_status") or details.get("safelist_status"))
+            in {"verified", "approved"}
+        ),
         recent_sales=sales,
         floor_asks=asks,
         floor_bids=bids,

@@ -61,7 +61,10 @@ def test_endpoint_paths_constructed_from_chain_protocol(tmp_path) -> None:
 
     assert any(m == "POST" and p == "/api/v2/listings/fulfillment_data" for (m, p, _, _) in client.calls)
     assert any(m == "POST" and p == "/api/v2/offers/fulfillment_data" for (m, p, _, _) in client.calls)
-    assert any(m == "GET" and p == "/api/v2/events/collection/cool" and q is None for (m, p, _, q) in client.calls)
+    assert any(
+        m == "GET" and p == "/events/collection/cool" and q == {"event_type": "sale"}
+        for (m, p, _, q) in client.calls
+    )
 
 
 def test_live_create_paths(tmp_path) -> None:

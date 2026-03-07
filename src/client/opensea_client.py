@@ -101,7 +101,7 @@ class OpenSeaClient:
         return self._request("GET", f"/collections/{slug}/stats")
 
     def get_events_by_collection(self, slug: str) -> Dict[str, Any]:
-        return self._request("GET", f"/api/v2/events/collection/{slug}")
+        return self._request("GET", f"/events/collection/{slug}", query={"event_type": "sale"})
 
     def get_best_listings_by_collection(self, slug: str) -> Dict[str, Any]:
         return self._request("GET", f"/listings/collection/{slug}/best")

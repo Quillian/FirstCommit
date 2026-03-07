@@ -86,6 +86,29 @@ class LiveRunner:
         return eth >= float(self.cfg["wallet"]["min_native_balance_eth"])
 
     @staticmethod
+    def _event_payment_eth(event: dict[str, Any]) -> float:
+        payment = event.get("payment_quantity")
+        if payment is None:
+            payment = event.get("payment")
+        if isinstance(payment, dict):
+            candidate = payment.get("quantity") or payment.get("current") or payment
+            if isinstance(candidate, dict):
+                value = candidate.get("value")
+                decimals = candidate.get("decimals")
+                if value is not None:
+                    try:
+                        as_float = float(value)
+                        if isinstance(decimals, int) and decimals >= 0:
+                            return as_float / (10 ** decimals)
+                        return as_float
+                    except (TypeError, ValueError):
+                        return 0.0
+        try:
+            return float(payment or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
     def _extract_order_rows(payload: dict[str, Any], side: str) -> list[dict[str, Any]]:
         rows = payload.get("orders") or payload.get("listings") or payload.get("offers") or []
         normalized: list[dict[str, Any]] = []
@@ -126,7 +149,7 @@ class LiveRunner:
                         "order_hash": event.get("order_hash") or event.get("orderHash"),
                         "token_key": f"{event.get('contract_address', 'unknown')}:{event.get('token_id', '')}",
                         "side": "offer",
-                        "fill_price_eth": float(event.get("payment_quantity", 0) or 0),
+                        "fill_price_eth": self._event_payment_eth(event),
                     }
                 )
         self.reconciler.fills_reconciliation(fills)

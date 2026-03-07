@@ -152,3 +152,8 @@ def test_extract_asset_identity_accepts_numeric_zero_token_id() -> None:
 
     assert contract == "0x00000000000000000000000000000000000000cc"
     assert token_id == "0"
+
+
+def test_event_payment_eth_supports_nested_payment_shape() -> None:
+    event = {"payment": {"quantity": {"value": "1000000000000000000", "decimals": 18}}}
+    assert LiveRunner._event_payment_eth(event) == 1.0
