@@ -18,9 +18,19 @@ class Storage:
         self.conn.commit()
 
     def _apply_migrations(self) -> None:
+        self._ensure_column("orders", "side", "TEXT NOT NULL DEFAULT 'unknown'")
+        self._ensure_column("inventory", "status", "TEXT NOT NULL DEFAULT 'OPEN'")
+        self._ensure_column("reconciliation_log", "healthy", "INTEGER NOT NULL DEFAULT 0")
+
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_order_status_history_order_hash ON order_status_history(order_hash)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_fills_order_hash ON fills(order_hash)")
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        columns = self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+        existing = {row["name"] for row in columns}
+        if column not in existing:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     @staticmethod
     def _now() -> str:

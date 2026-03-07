@@ -37,7 +37,11 @@ class Reconciler:
         }
 
     def _err(self, reason: str) -> None:
-        self._state["errors"].append(reason)
+        if reason not in self._state["errors"]:
+            self._state["errors"].append(reason)
+
+    def _clear_error(self, reason: str) -> None:
+        self._state["errors"] = [error for error in self._state["errors"] if error != reason]
 
     def order_status_reconciliation(self, api_orders: list[dict[str, Any]]) -> int:
         updated = 0
@@ -56,6 +60,7 @@ class Reconciler:
                 if str(o.get("status", "")).upper() in OPEN_STATUSES and str(o.get("side", "offer")) == "offer"
             )
             self._state["orders_seen"] = True
+            self._clear_error("order_source_failed")
         except Exception:
             self._err("order_source_failed")
         return updated
@@ -73,6 +78,7 @@ class Reconciler:
                 1 for listing in api_listings if str(listing.get("status", "")).upper() in OPEN_STATUSES
             )
             self._state["listings_seen"] = True
+            self._clear_error("listing_source_failed")
         except Exception:
             self._err("listing_source_failed")
         return updated
@@ -82,6 +88,7 @@ class Reconciler:
             self.storage.replace_inventory(wallet_assets)
             self._state["expected_inventory"] = len(wallet_assets)
             self._state["inventory_seen"] = True
+            self._clear_error("inventory_source_failed")
         except Exception:
             self._err("inventory_source_failed")
         return len(wallet_assets)
@@ -99,6 +106,7 @@ class Reconciler:
                 )
             self._state["expected_fills"] = self.storage.count_fills()
             self._state["fills_seen"] = True
+            self._clear_error("fill_source_failed")
         except Exception:
             self._err("fill_source_failed")
         return len(api_fills)

@@ -1,4 +1,5 @@
 import json
+import sqlite3
 
 from src.core.decision_engine import DecisionEngine, MarketInputs
 from src.execution.order_manager import ExecutionConfig, OrderManager
@@ -104,3 +105,46 @@ def test_decision_persistence_after_runtime_mutation(tmp_path) -> None:
     storage.log_decision("cool", decision)
     row = storage.conn.execute("SELECT decision_json FROM decisions ORDER BY id DESC LIMIT 1").fetchone()
     assert json.loads(row["decision_json"]) == decision
+
+
+def test_storage_migrates_legacy_tables_before_writes(tmp_path) -> None:
+    db_path = tmp_path / "legacy.sqlite3"
+    legacy_conn = sqlite3.connect(db_path)
+    legacy_conn.executescript(
+        """
+        CREATE TABLE orders (
+          order_hash TEXT PRIMARY KEY,
+          ts TEXT NOT NULL,
+          status TEXT NOT NULL,
+          collection_slug TEXT,
+          token_key TEXT,
+          payload_json TEXT NOT NULL
+        );
+        CREATE TABLE inventory (
+          token_key TEXT PRIMARY KEY,
+          ts TEXT NOT NULL,
+          collection_slug TEXT NOT NULL,
+          payload_json TEXT NOT NULL
+        );
+        CREATE TABLE reconciliation_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts TEXT NOT NULL,
+          pause_reason TEXT,
+          payload_json TEXT NOT NULL
+        );
+        """
+    )
+    legacy_conn.commit()
+    legacy_conn.close()
+
+    storage = Storage(str(db_path))
+    storage.upsert_order("0x1", "OPEN", {"collection": "cool"}, side="offer")
+    storage.replace_inventory([{"token_key": "0xabc:1", "collection": "cool", "token_id": "1"}])
+    storage.log_reconciliation({"healthy": True, "pause_reason": None, "reasons": []})
+
+    order_side = storage.conn.execute("SELECT side FROM orders WHERE order_hash='0x1'").fetchone()["side"]
+    inventory_status = storage.conn.execute("SELECT status FROM inventory WHERE token_key='0xabc:1'").fetchone()["status"]
+    healthy_value = storage.conn.execute("SELECT healthy FROM reconciliation_log ORDER BY id DESC LIMIT 1").fetchone()["healthy"]
+    assert order_side == "offer"
+    assert inventory_status == "OPEN"
+    assert healthy_value == 1

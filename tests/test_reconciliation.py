@@ -63,3 +63,32 @@ def test_missing_state_source_is_unhealthy(tmp_path) -> None:
     status = reconciler.health()
     assert status.healthy is False
     assert "missing_wallet_address" in status.reasons
+
+
+def test_source_failure_error_clears_after_successful_retry(tmp_path, monkeypatch) -> None:
+    storage = _storage(tmp_path)
+    reconciler = Reconciler(storage)
+
+    def _fail_once(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(storage, "upsert_order", _fail_once)
+    status_after_failure = reconciler.order_status_reconciliation([
+        {"order_hash": "0x1", "status": "OPEN", "side": "offer"},
+    ])
+
+    assert status_after_failure == 0
+    assert "order_source_failed" in reconciler.health().reasons
+
+    monkeypatch.undo()
+
+    updated = reconciler.order_status_reconciliation([
+        {"order_hash": "0x1", "status": "OPEN", "side": "offer"},
+    ])
+    reconciler.listing_reconciliation([])
+    reconciler.inventory_reconciliation([])
+    reconciler.fills_reconciliation([])
+
+    assert updated == 1
+    status_after_recovery = reconciler.health()
+    assert "order_source_failed" not in status_after_recovery.reasons
