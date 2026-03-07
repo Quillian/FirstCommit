@@ -61,6 +61,11 @@ def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str
 
 
 def _extract_asset_identity(*payloads: dict[str, Any]) -> tuple[str | None, str | None]:
+    def _dict_value(container: Any, key: str) -> Any:
+        if not isinstance(container, dict):
+            return None
+        return container.get(key)
+
     def _is_invalid_placeholder(candidate: Any) -> bool:
         if candidate is None:
             return True
@@ -82,16 +87,18 @@ def _extract_asset_identity(*payloads: dict[str, Any]) -> tuple[str | None, str 
     for payload in payloads:
         for key in ("listings", "offers", "asset_events", "assets", "nfts"):
             for row in payload.get(key) or []:
+                asset_contract = _dict_value(row, "asset_contract")
+                asset = _dict_value(row, "asset")
                 contract = _pick_value(
                     row.get("contract"),
                     row.get("contract_address"),
-                    (row.get("asset_contract") or {}).get("address"),
-                    ((row.get("asset") or {}).get("asset_contract") or {}).get("address"),
+                    _dict_value(asset_contract, "address"),
+                    _dict_value(_dict_value(asset, "asset_contract"), "address"),
                 )
                 token_id = _pick_value(
                     row.get("token_id"),
                     row.get("identifier"),
-                    (row.get("asset") or {}).get("token_id"),
+                    _dict_value(asset, "token_id"),
                 )
                 if contract is not None and token_id is not None:
                     return str(contract), str(token_id)
