@@ -61,17 +61,30 @@ def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str
 
 
 def _extract_asset_identity(*payloads: dict[str, Any]) -> tuple[str | None, str | None]:
+    def _pick_value(*candidates: Any) -> Any:
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            if isinstance(candidate, str) and candidate.strip() == "":
+                continue
+            return candidate
+        return None
+
     for payload in payloads:
         for key in ("listings", "offers", "asset_events", "assets", "nfts"):
             for row in payload.get(key) or []:
-                contract = (
-                    row.get("contract")
-                    or row.get("contract_address")
-                    or (row.get("asset_contract") or {}).get("address")
-                    or ((row.get("asset") or {}).get("asset_contract") or {}).get("address")
+                contract = _pick_value(
+                    row.get("contract"),
+                    row.get("contract_address"),
+                    (row.get("asset_contract") or {}).get("address"),
+                    ((row.get("asset") or {}).get("asset_contract") or {}).get("address"),
                 )
-                token_id = row.get("token_id") or row.get("identifier") or (row.get("asset") or {}).get("token_id")
-                if contract and token_id is not None and str(token_id).strip() != "":
+                token_id = _pick_value(
+                    row.get("token_id"),
+                    row.get("identifier"),
+                    (row.get("asset") or {}).get("token_id"),
+                )
+                if contract is not None and token_id is not None:
                     return str(contract), str(token_id)
     return None, None
 
