@@ -28,6 +28,11 @@ def _to_float(raw: Any) -> float | None:
         current = raw.get("current")
         if isinstance(current, dict):
             raw = current
+        if isinstance(raw.get("value"), (str, int, float)) and isinstance(raw.get("decimals"), int):
+            try:
+                return float(raw.get("value")) / (10 ** int(raw.get("decimals")))
+            except (TypeError, ValueError):
+                return None
         for candidate in (
             raw.get("eth"),
             raw.get("quantity"),
@@ -68,8 +73,21 @@ def _to_float_list(values: list[Any], key: str | None = None) -> list[float]:
     return out
 
 
+def _first_by_path(container: Any, *paths: tuple[str, ...]) -> Any:
+    for path in paths:
+        current = container
+        for segment in path:
+            if not isinstance(current, dict):
+                current = None
+                break
+            current = current.get(segment)
+        if current is not None:
+            return current
+    return None
+
+
 def _extract_fee_bps(collection_details: dict[str, Any]) -> tuple[int | None, int | None]:
-    fees = collection_details.get("fees") or {}
+    fees = _first_by_path(collection_details, ("fees",), ("collection", "fees")) or {}
     opensea_fees = fees.get("opensea_fees") or []
     seller_fees = fees.get("seller_fees") or []
 
@@ -85,13 +103,22 @@ def _extract_fee_bps(collection_details: dict[str, Any]) -> tuple[int | None, in
 
     marketplace_items = [item for item in opensea_values if isinstance(item, dict)]
     royalty_items = [item for item in seller_values if isinstance(item, dict)]
-    marketplace = sum(int(float(item.get("fee", 0)) * 100) for item in marketplace_items) if marketplace_items else None
-    royalties = sum(int(float(item.get("fee", 0)) * 100) for item in royalty_items) if royalty_items else None
+    def _fee_item_bps(item: dict[str, Any]) -> int:
+        fee = _first_by_path(item, ("fee",), ("basis_points",), ("bps",))
+        if fee is None:
+            return 0
+        as_float = float(fee)
+        if as_float > 100:
+            return int(as_float)
+        return int(as_float * 100)
+
+    marketplace = sum(_fee_item_bps(item) for item in marketplace_items) if marketplace_items else None
+    royalties = sum(_fee_item_bps(item) for item in royalty_items) if royalty_items else None
     return marketplace, royalties
 
 
 def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str, Any]]:
-    fees = collection_details.get("fees") or {}
+    fees = _first_by_path(collection_details, ("fees",), ("collection", "fees")) or {}
     recipients: list[dict[str, Any]] = []
     for bucket in (fees.get("opensea_fees") or {}, fees.get("seller_fees") or {}):
         rows = bucket.values() if isinstance(bucket, dict) else bucket
@@ -101,7 +128,11 @@ def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str
             recipient = str(item.get("recipient") or item.get("address") or "").strip()
             if not recipient:
                 continue
-            bps = int(float(item.get("fee", 0)) * 100)
+            fee = _first_by_path(item, ("fee",), ("basis_points",), ("bps",))
+            if fee is None:
+                continue
+            fee_float = float(fee)
+            bps = int(fee_float if fee_float > 100 else fee_float * 100)
             if bps <= 0:
                 continue
             recipients.append({"recipient": recipient, "bps": bps})
@@ -162,20 +193,50 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
     all_offers = client.get_all_offers_by_collection(slug)
 
     sales_payload = events.get("asset_events", [])
-    sales = _to_float_list(sales_payload, "payment_quantity")
-    if not sales:
-        sales = _to_float_list(sales_payload, "payment")
-    asks = _to_float_list(
-        best_listings.get("listings", []) + all_listings.get("listings", []),
-        "current_price",
-    )
-    if not asks:
-        asks = _to_float_list(best_listings.get("listings", []) + all_listings.get("listings", []), "price")
+    sales: list[float] = []
+    for sale_row in sales_payload:
+        raw_sale_value = _first_by_path(
+            sale_row,
+            ("payment_quantity",),
+            ("payment",),
+            ("payment", "quantity"),
+            ("sale_price",),
+            ("total_price",),
+            ("price",),
+        )
+        parsed = _to_float(raw_sale_value)
+        if parsed is not None:
+            sales.append(parsed)
+
+    asks: list[float] = []
+    for listing in best_listings.get("listings", []) + all_listings.get("listings", []):
+        raw_ask_value = _first_by_path(
+            listing,
+            ("current_price",),
+            ("price",),
+            ("price", "current"),
+            ("base_price",),
+            ("starting_price",),
+        )
+        parsed = _to_float(raw_ask_value)
+        if parsed is not None:
+            asks.append(parsed)
     bids = _to_float_list(all_offers.get("offers", []), "price")
 
-    volume = float((stats.get("total") or {}).get("volume", 0.0))
     total_stats = stats.get("total") or {}
-    count = float(total_stats.get("count", total_stats.get("sales", 0.0)))
+    volume = float(_first_by_path(stats, ("total", "volume"), ("volume",), ("stats", "volume")) or 0.0)
+    count = float(
+        _first_by_path(
+            stats,
+            ("total", "count"),
+            ("total", "sales"),
+            ("count",),
+            ("sales",),
+            ("stats", "count"),
+            ("stats", "sales"),
+        )
+        or 0.0
+    )
     velocity = min(1.0, count / max(cfg["pricing"]["velocity_norm_denominator"], 1))
     liquidity = min(1.0, (volume / max(count, 1.0)) / max(asks[0] if asks else 1.0, 1e-9)) if count > 0 else 0.0
 
@@ -185,8 +246,17 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
     return MarketInputs(
         collection_slug=slug,
         verified=bool(
-            (details.get("collection", {}).get("safelist_status") or details.get("safelist_status"))
-            in {"verified", "approved"}
+            _first_by_path(
+                details,
+                ("collection", "safelist_status"),
+                ("safelist_status",),
+                ("collection", "verification_status"),
+                ("verification_status",),
+                ("collection", "is_verified"),
+                ("is_verified",),
+                ("collection", "details", "collection", "safelist_status"),
+            )
+            in {"verified", "approved", "is_verified", True}
         ),
         recent_sales=sales,
         floor_asks=asks,

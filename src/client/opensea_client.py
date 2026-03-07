@@ -32,7 +32,10 @@ class OpenSeaClient:
         timeout_sec: int = 10,
         retry_attempts: int = 3,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        normalized = base_url.rstrip("/")
+        if normalized.endswith("/api/v2"):
+            normalized = normalized[: -len("/api/v2")]
+        self.base_url = normalized
         self.auth = auth
         self.rate_limiter = rate_limiter
         self.timeout_sec = timeout_sec
@@ -125,10 +128,10 @@ class OpenSeaClient:
         return self._request("POST", f"/orders/{chain}/{protocol}/{order_hash}/cancel", payload={})
 
     def fulfill_listing(self, payload: Dict[str, Any], chain: str, protocol: str) -> Dict[str, Any]:
-        return self._request("POST", "/api/v2/listings/fulfillment_data", payload)
+        return self._request("POST", "/listings/fulfillment_data", payload)
 
     def fulfill_offer(self, payload: Dict[str, Any], chain: str, protocol: str) -> Dict[str, Any]:
-        return self._request("POST", "/api/v2/offers/fulfillment_data", payload)
+        return self._request("POST", "/offers/fulfillment_data", payload)
 
     def stream_integration_path(self) -> str:
         return "Use configured stream websocket URL with auth headers for future event-driven fills/listing deltas"
