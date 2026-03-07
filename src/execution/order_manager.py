@@ -135,6 +135,12 @@ class OrderManager:
                 *fee_items,
             ]
         else:
+            raw_seller_recipient = payload.get("seller_recipient")
+            seller_recipient = (
+                str(raw_seller_recipient).strip()
+                if raw_seller_recipient
+                else "0x0000000000000000000000000000000000000000"
+            )
             if seller_proceeds_wei > 0:
                 consideration.append(
                     {
@@ -143,7 +149,7 @@ class OrderManager:
                         "identifierOrCriteria": "0",
                         "startAmount": str(seller_proceeds_wei),
                         "endAmount": str(seller_proceeds_wei),
-                        "recipient": str(payload.get("seller_recipient", wallet)),
+                        "recipient": seller_recipient,
                     }
                 )
             consideration.extend(fee_items)
@@ -177,6 +183,7 @@ class OrderManager:
         price_eth: float,
         wallet: str,
         fee_recipients: list[dict[str, Any]] | None = None,
+        seller_recipient: str | None = None,
     ) -> dict[str, object]:
         return self._seaport_order_shell(
             "offer",
@@ -184,6 +191,7 @@ class OrderManager:
             {
                 "collection": collection_slug,
                 "price_eth": price_eth,
+                "seller_recipient": seller_recipient,
             },
             fee_recipients=fee_recipients,
         )

@@ -47,9 +47,9 @@ def test_endpoint_paths_constructed_from_chain_protocol(tmp_path) -> None:
     client.fulfill_offer({"offer": {}}, chain="ethereum", protocol="seaport")
     client.get_events_by_collection("cool")
 
-    assert any(m == "POST" and p == "/api/v2/listings/fulfillment_data" for (m, p, _, _) in client.calls)
-    assert any(m == "POST" and p == "/api/v2/offers/fulfillment_data" for (m, p, _, _) in client.calls)
-    assert any(m == "GET" and p == "/api/v2/events/collection/cool" and q is None for (m, p, _, q) in client.calls)
+    assert any(m == "POST" and p == "/listings/fulfillment_data" for (m, p, _, _) in client.calls)
+    assert any(m == "POST" and p == "/offers/fulfillment_data" for (m, p, _, _) in client.calls)
+    assert any(m == "GET" and p == "/events/collection/cool" and q is None for (m, p, _, q) in client.calls)
 
 
 def test_live_create_paths(tmp_path) -> None:
@@ -97,6 +97,25 @@ def test_order_payload_includes_fee_recipients(tmp_path) -> None:
     fee_recipients = {item["recipient"] for item in consideration if item["itemType"] == 1}
     assert "0x00000000000000000000000000000000000000aa" in fee_recipients
     assert "0x00000000000000000000000000000000000000bb" in fee_recipients
+
+
+
+def test_offer_proceeds_default_recipient_is_not_bidder_wallet(tmp_path) -> None:
+    client = CapturingClient()
+    storage = Storage(str(tmp_path / "db.sqlite3"))
+    manager = OrderManager(
+        client,
+        Signer(None),
+        storage,
+        ExecutionConfig(mode="paper", dry_run=True, write_enabled=False, chain="ethereum", protocol="seaport"),
+    )
+
+    wallet = "0x0000000000000000000000000000000000000001"
+    payload = manager.build_offer_payload("cool", 0.5, wallet)
+    consideration = payload["protocol_data"]["parameters"]["consideration"]
+    proceeds_item = next(item for item in consideration if item["itemType"] == 1)
+    assert proceeds_item["recipient"] != wallet
+    assert proceeds_item["recipient"] == "0x0000000000000000000000000000000000000000"
 
 def test_invalid_order_payload_prevented() -> None:
     signer = Signer(None)
