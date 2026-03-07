@@ -45,6 +45,21 @@ def _extract_fee_bps(collection_details: dict[str, Any]) -> tuple[int | None, in
     return marketplace, royalties
 
 
+def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str, Any]]:
+    fees = collection_details.get("fees") or {}
+    recipients: list[dict[str, Any]] = []
+    for bucket in (fees.get("opensea_fees") or {}, fees.get("seller_fees") or {}):
+        for item in bucket.values():
+            recipient = str(item.get("recipient") or item.get("address") or "").strip()
+            if not recipient:
+                continue
+            bps = int(float(item.get("fee", 0)) * 100)
+            if bps <= 0:
+                continue
+            recipients.append({"recipient": recipient, "bps": bps})
+    return recipients
+
+
 def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -> MarketInputs:
     details = client.get_collection_details(slug)
     stats = client.get_collection_stats(slug)
@@ -66,6 +81,7 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
     liquidity = min(1.0, (volume / max(count, 1.0)) / max(asks[0] if asks else 1.0, 1e-9)) if count > 0 else 0.0
 
     marketplace_bps, royalties_bps = _extract_fee_bps(details)
+    fee_recipients = _extract_fee_recipients(details)
     return MarketInputs(
         collection_slug=slug,
         verified=bool(details.get("collection", {}).get("safelist_status") in {"verified", "approved"}),
@@ -81,11 +97,18 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
         inventory_age_sec=180,
         marketplace_bps=marketplace_bps,
         royalties_bps=royalties_bps,
+        fee_recipients=fee_recipients,
     )
 
 
 def _market_data_healthy(market: MarketInputs) -> bool:
     return bool(market.recent_sales and market.floor_asks and market.floor_bids)
+
+
+def _live_fee_data_healthy(market: MarketInputs, cfg: dict[str, Any]) -> bool:
+    if cfg["mode"] != "live" or not cfg["fees"].get("use_collection_fees", True):
+        return True
+    return market.marketplace_bps is not None and market.royalties_bps is not None and bool(market.fee_recipients)
 
 
 def main() -> None:
@@ -133,11 +156,15 @@ def main() -> None:
             rank_in_book=1,
             local_depth=0,
             inventory_age_sec=0,
+            fee_recipients=[],
         )
 
     if cfg["mode"] == "paper":
         PaperRunner(cfg, decision_engine, order_manager, storage, reconciler).run_once(market, wallet_sufficient=True)
         return
+
+    if not _live_fee_data_healthy(market, cfg):
+        raise RuntimeError("live_launch_blocked_collection_fees_unavailable")
 
     if not _market_data_healthy(market):
         raise RuntimeError("live_launch_blocked_market_data_unavailable")
