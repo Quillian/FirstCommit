@@ -28,6 +28,8 @@ class MarketInputs:
     marketplace_bps: int | None = None
     royalties_bps: int | None = None
     fee_recipients: list[dict[str, Any]] = field(default_factory=list)
+    target_collection_contract: str | None = None
+    target_token_id: str | None = None
 
 
 class DecisionEngine:

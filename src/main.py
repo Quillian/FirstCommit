@@ -60,6 +60,22 @@ def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str
     return recipients
 
 
+def _extract_asset_identity(*payloads: dict[str, Any]) -> tuple[str | None, str | None]:
+    for payload in payloads:
+        for key in ("listings", "offers", "asset_events", "assets", "nfts"):
+            for row in payload.get(key) or []:
+                contract = (
+                    row.get("contract")
+                    or row.get("contract_address")
+                    or (row.get("asset_contract") or {}).get("address")
+                    or ((row.get("asset") or {}).get("asset_contract") or {}).get("address")
+                )
+                token_id = row.get("token_id") or row.get("identifier") or (row.get("asset") or {}).get("token_id")
+                if contract and token_id is not None and str(token_id).strip() != "":
+                    return str(contract), str(token_id)
+    return None, None
+
+
 def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -> MarketInputs:
     details = client.get_collection_details(slug)
     stats = client.get_collection_stats(slug)
@@ -82,6 +98,7 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
 
     marketplace_bps, royalties_bps = _extract_fee_bps(details)
     fee_recipients = _extract_fee_recipients(details)
+    target_collection_contract, target_token_id = _extract_asset_identity(best_listings, all_listings, all_offers, events)
     return MarketInputs(
         collection_slug=slug,
         verified=bool(details.get("collection", {}).get("safelist_status") in {"verified", "approved"}),
@@ -98,6 +115,8 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
         marketplace_bps=marketplace_bps,
         royalties_bps=royalties_bps,
         fee_recipients=fee_recipients,
+        target_collection_contract=target_collection_contract,
+        target_token_id=target_token_id,
     )
 
 
