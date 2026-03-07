@@ -160,3 +160,57 @@ def test_live_fee_guard_blocks_when_dynamic_fees_missing(monkeypatch, tmp_path) 
 
     with pytest.raises(RuntimeError, match="live_launch_blocked_collection_fees_unavailable"):
         main.main()
+
+
+def test_market_from_opensea_supports_new_payload_shapes() -> None:
+    class NewShapeClient(FakeClient):
+        def get_collection_details(self, slug: str):
+            self.called.append("details")
+            return {
+                "safelist_status": "approved",
+                "fees": {
+                    "opensea_fees": [
+                        {"fee": 2.5, "address": "0x00000000000000000000000000000000000000aa"},
+                    ],
+                    "seller_fees": [
+                        {"fee": 5.0, "recipient": "0x00000000000000000000000000000000000000bb"},
+                    ],
+                },
+            }
+
+        def get_collection_stats(self, slug: str):
+            self.called.append("stats")
+            return {"total": {"volume": 100, "sales": 10}}
+
+        def get_events_by_collection(self, slug: str):
+            self.called.append("events")
+            return {
+                "asset_events": [
+                    {
+                        "payment": {
+                            "quantity": {
+                                "value": "1000000000000000000",
+                                "decimals": 18,
+                            }
+                        }
+                    }
+                ]
+            }
+
+        def get_best_listings_by_collection(self, slug: str):
+            self.called.append("best_listings")
+            return {"listings": [{"price": {"current": {"value": "1.1"}}}]}
+
+        def get_all_listings_by_collection(self, slug: str):
+            self.called.append("all_listings")
+            return {"listings": []}
+
+    cfg = {"pricing": {"velocity_norm_denominator": 100}}
+    market = main.market_from_opensea(NewShapeClient(), "cool", cfg)
+
+    assert market.verified is True
+    assert market.recent_sales == [1.0]
+    assert market.floor_asks == [1.1]
+    assert market.marketplace_bps == 250
+    assert market.royalties_bps == 500
+    assert len(market.fee_recipients) == 2
