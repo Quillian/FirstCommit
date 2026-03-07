@@ -212,19 +212,17 @@ def main() -> None:
         return
 
     if not _live_fee_data_healthy(market, cfg):
+        storage.log_pause_reason("missing_dynamic_fees", {"collection": slug})
         raise RuntimeError("live_launch_blocked_collection_fees_unavailable")
 
     if not _market_data_healthy(market):
+        storage.log_pause_reason("invalid_market_data", {"collection": slug})
         raise RuntimeError("live_launch_blocked_market_data_unavailable")
 
     live_runner = LiveRunner(cfg, client, decision_engine, order_manager, storage, reconciler)
-    live_runner.reconcile_account_state()
-    if not live_runner.reconciler.health().healthy:
-        raise RuntimeError("live_launch_blocked_reconciliation_unhealthy")
-    if not live_runner.check_wallet_balance():
-        raise RuntimeError("live_launch_blocked_wallet_balance_insufficient")
-
-    live_runner.cycle(market)
+    cycles = int(cfg.get("runtime", {}).get("cycle_count", 10 if cfg.get("dry_run") else 1))
+    for _ in range(max(1, cycles)):
+        live_runner.cycle(market)
 
 
 if __name__ == "__main__":

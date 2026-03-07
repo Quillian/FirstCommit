@@ -42,8 +42,9 @@ class DecisionEngine:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "collection_slug": inputs.collection_slug,
                 "action": "DO_NOTHING",
-                "rationale": "blocked_market_data_missing",
-                "risk_flags": ["market_data_missing"],
+                "rationale": "blocked_invalid_market_data",
+                "risk_flags": ["invalid_market_data"],
+                "pause_reasons": ["invalid_market_data"],
                 "next_check_sec": self.cfg["throttling"]["scheduler_cycle_sec"],
             }
 
@@ -79,7 +80,7 @@ class DecisionEngine:
         bid_price = max(0.0, raw_bid_price)
         budget_flags: list[str] = []
         if bid_price > bid_budget_cap:
-            budget_flags.append("bid_exceeds_budget_cap")
+            budget_flags.append("budget_cap_exceeded")
 
         if self.cfg["fees"].get("use_collection_fees", True):
             marketplace_bps = inputs.marketplace_bps
@@ -88,9 +89,7 @@ class DecisionEngine:
             marketplace_bps = None
             royalties_bps = None
 
-        marketplace_bps = (
-            marketplace_bps if marketplace_bps is not None else self.cfg["fees"]["default_marketplace_bps"]
-        )
+        marketplace_bps = marketplace_bps if marketplace_bps is not None else self.cfg["fees"]["default_marketplace_bps"]
         royalties_bps = royalties_bps if royalties_bps is not None else self.cfg["fees"]["default_royalties_bps"]
 
         net = expected_net_pnl(
@@ -113,6 +112,24 @@ class DecisionEngine:
         )
         flags = evaluate_hard_gates(risk_ctx) + budget_flags
         action = "PLACE_BID" if not flags else "DO_NOTHING"
+
+        pause_reasons = [
+            f
+            for f in flags
+            if f
+            in {
+                "reconciliation_unhealthy",
+                "missing_dynamic_fees",
+                "missing_target_asset_identity",
+                "insufficient_wallet_balance",
+                "signer_unavailable",
+                "invalid_market_data",
+                "budget_cap_exceeded",
+                "regime_dead",
+                "liquidity_below_threshold",
+            }
+        ]
+
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "collection_slug": inputs.collection_slug,
@@ -124,8 +141,14 @@ class DecisionEngine:
             "action": action,
             "rationale": "all_hard_gates_passed" if action == "PLACE_BID" else "blocked_by_hard_gates",
             "risk_flags": flags,
+            "pause_reasons": pause_reasons,
             "next_check_sec": self.cfg["throttling"]["scheduler_cycle_sec"],
             "bid_price": round(bid_price, 6),
             "bid_budget_cap_eth": bid_budget_cap,
+            "budget_context": {
+                "target_bid": round(target_bid, 6),
+                "raw_bid_price": round(raw_bid_price, 6),
+                "cap_gap_eth": round(max(0.0, bid_price - bid_budget_cap), 6),
+            },
             "fees_bps": {"marketplace": marketplace_bps, "royalties": royalties_bps},
         }

@@ -26,9 +26,14 @@ class StubReconciler:
         return self._Health()
 
 
+class _StubSigner:
+    private_key = "0xabc"
+
+
 class StubOrderManager:
     def __init__(self):
         self.called = False
+        self.signer = _StubSigner()
 
     def build_offer_payload(self, *args, **kwargs):
         self.called = True

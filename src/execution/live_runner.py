@@ -86,14 +86,14 @@ class LiveRunner:
         return eth >= float(self.cfg["wallet"]["min_native_balance_eth"])
 
     @staticmethod
-    def _extract_order_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    def _extract_order_rows(payload: dict[str, Any], side: str) -> list[dict[str, Any]]:
         rows = payload.get("orders") or payload.get("listings") or payload.get("offers") or []
         normalized: list[dict[str, Any]] = []
         for row in rows:
             order_hash = row.get("order_hash") or row.get("orderHash")
             status = row.get("status") or ("OPEN" if row.get("is_valid", True) else "CANCELLED")
             if order_hash:
-                normalized.append({"order_hash": order_hash, "status": str(status).upper(), **row})
+                normalized.append({"order_hash": order_hash, "status": str(status).upper(), "side": side, **row})
         return normalized
 
     @staticmethod
@@ -103,31 +103,55 @@ class LiveRunner:
         for asset in assets:
             contract = asset.get("contract") or asset.get("contract_address") or "unknown"
             token_id = str(asset.get("identifier") or asset.get("token_id") or "")
-            normalized.append({"token_key": f"{contract}:{token_id}", "collection": contract, "token_id": token_id, **asset})
+            normalized.append(
+                {"token_key": f"{contract}:{token_id}", "collection": contract, "token_id": token_id, **asset}
+            )
         return normalized
 
     def reconcile_account_state(self) -> None:
         slug = self.cfg["collections"]["allowlist"][0]
         listings = self.client.get_all_listings_by_collection(slug)
         offers = self.client.get_all_offers_by_collection(slug)
-        orders = self._extract_order_rows(listings) + self._extract_order_rows(offers)
-        self.reconciler.order_status_reconciliation(orders)
+        listing_rows = self._extract_order_rows(listings, side="listing")
+        offer_rows = self._extract_order_rows(offers, side="offer")
+        self.reconciler.order_status_reconciliation(offer_rows + listing_rows)
+        self.reconciler.listing_reconciliation(listing_rows)
+
+        events = self.client.get_events_by_collection(slug)
+        fills = []
+        for event in events.get("asset_events", []):
+            if str(event.get("event_type", "")).lower() in {"sale", "successful"}:
+                fills.append(
+                    {
+                        "order_hash": event.get("order_hash") or event.get("orderHash"),
+                        "token_key": f"{event.get('contract_address', 'unknown')}:{event.get('token_id', '')}",
+                        "side": "offer",
+                        "fill_price_eth": float(event.get("payment_quantity", 0) or 0),
+                    }
+                )
+        self.reconciler.fills_reconciliation(fills)
 
         wallet = os.getenv(self.cfg["wallet"]["address_env"], "")
         if wallet:
             inv_payload = self.client.get_account_nfts(self.cfg["opensea"]["chain"], wallet)
             self.reconciler.inventory_reconciliation(self._extract_inventory_rows(inv_payload))
+        else:
+            self.reconciler.mark_missing_source("missing_wallet_address")
 
     def cycle(self, market: MarketInputs) -> dict[str, Any]:
         self.reconcile_account_state()
         wallet_ok = self.check_wallet_balance()
-        reconciliation_healthy = self.reconciler.health().healthy
+        reconciliation_status = self.reconciler.health()
         decision = self.decision_engine.evaluate(
             market,
             inventory_count=self.storage.count_inventory(),
-            reconciliation_healthy=reconciliation_healthy,
+            reconciliation_healthy=reconciliation_status.healthy,
             wallet_sufficient=wallet_ok,
         )
+
+        if not self.order_manager.signer.private_key and self.cfg.get("mode") == "live":
+            decision["action"] = "DO_NOTHING"
+            decision.setdefault("risk_flags", []).append("signer_unavailable")
 
         if decision["action"] == "PLACE_BID":
             if not market.target_collection_contract or not market.target_token_id:
@@ -144,6 +168,20 @@ class LiveRunner:
                     fee_recipients=market.fee_recipients,
                 )
                 decision["offer_result"] = self.order_manager.create_offer(payload)
+
+        for reason in decision.get("risk_flags", []):
+            if reason in {
+                "reconciliation_unhealthy",
+                "missing_dynamic_fees",
+                "missing_target_asset_identity",
+                "insufficient_wallet_balance",
+                "signer_unavailable",
+                "invalid_market_data",
+                "budget_cap_exceeded",
+                "regime_dead",
+                "liquidity_below_threshold",
+            }:
+                self.storage.log_pause_reason(reason, {"collection": market.collection_slug, "decision": decision})
 
         self.storage.log_decision(market.collection_slug, decision)
         return decision

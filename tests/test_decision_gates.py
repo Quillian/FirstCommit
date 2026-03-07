@@ -51,7 +51,7 @@ def test_market_data_missing_blocks_live_gating() -> None:
     )
     decision = engine.evaluate(inputs, inventory_count=0, reconciliation_healthy=True, wallet_sufficient=True)
     assert decision["action"] == "DO_NOTHING"
-    assert "market_data_missing" in decision["risk_flags"]
+    assert "invalid_market_data" in decision["risk_flags"]
 
 
 def test_dynamic_fees_used_in_expected_pnl() -> None:
@@ -97,5 +97,5 @@ def test_bid_size_is_budget_cap_not_price_target() -> None:
     )
     decision = engine.evaluate(inputs, inventory_count=0, reconciliation_healthy=True, wallet_sufficient=True)
     assert decision["bid_price"] > decision["bid_budget_cap_eth"]
-    assert "bid_exceeds_budget_cap" in decision["risk_flags"]
+    assert "budget_cap_exceeded" in decision["risk_flags"]
     assert decision["action"] == "DO_NOTHING"

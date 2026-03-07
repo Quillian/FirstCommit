@@ -233,7 +233,7 @@ class OrderManager:
             result = {"status": "DRY_RUN", "order": order, "order_hash": f"dry_{order['signature'][-10:]}"}
         else:
             result = self.client.create_item_offer(self.cfg.chain, self.cfg.protocol, order)
-        self.storage.upsert_order(result.get("order_hash", "unknown"), result.get("status", "PENDING"), result)
+        self.storage.upsert_order(result.get("order_hash", "unknown"), result.get("status", "PENDING"), result, side="offer")
         return result
 
     def create_listing(self, payload: dict[str, object]) -> dict[str, object]:
@@ -242,7 +242,8 @@ class OrderManager:
             result = {"status": "DRY_RUN", "order": order, "order_hash": f"dry_{order['signature'][-10:]}"}
         else:
             result = self.client.create_listing(self.cfg.chain, self.cfg.protocol, order)
-        self.storage.upsert_order(result.get("order_hash", "unknown"), result.get("status", "PENDING"), result)
+        self.storage.upsert_order(result.get("order_hash", "unknown"), result.get("status", "PENDING"), result, side="listing")
+        self.storage.upsert_listing(result.get("order_hash", "unknown"), result.get("status", "PENDING"), result)
         return result
 
     def cancel_order(self, order_hash: str) -> dict[str, object]:

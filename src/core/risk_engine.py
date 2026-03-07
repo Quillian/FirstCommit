@@ -24,7 +24,7 @@ def evaluate_hard_gates(ctx: RiskContext) -> list[str]:
     if not ctx.verified:
         flags.append("collection_not_verified")
     if ctx.liquidity_score < 0.55:
-        flags.append("liquidity_weak")
+        flags.append("liquidity_below_threshold")
     if ctx.expected_net_pnl < 0:
         flags.append("expected_net_pnl_negative")
     if ctx.regime == Regime.DEAD:
