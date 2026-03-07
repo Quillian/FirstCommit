@@ -70,12 +70,26 @@ class DecisionEngine:
         )
 
         target_bid = min(fair_value * (1 - self.cfg["pricing"]["edge_buffer_pct"]), max(inputs.floor_bids))
-        bid_price = min(target_bid, self.cfg["pricing"]["max_bid_price_eth"])
-        if bid_price > self.cfg["size_controls"]["bid_size_eth"]:
-            bid_price = self.cfg["size_controls"]["bid_size_eth"]
+        raw_bid_price = min(target_bid, self.cfg["pricing"]["max_bid_price_eth"])
 
-        marketplace_bps = inputs.marketplace_bps if inputs.marketplace_bps is not None else self.cfg["fees"]["default_marketplace_bps"]
-        royalties_bps = inputs.royalties_bps if inputs.royalties_bps is not None else self.cfg["fees"]["default_royalties_bps"]
+        bid_budget_cap = float(self.cfg["size_controls"]["bid_size_eth"])
+        bid_price = max(0.0, raw_bid_price)
+        budget_flags: list[str] = []
+        if bid_price > bid_budget_cap:
+            budget_flags.append("bid_exceeds_budget_cap")
+
+        if self.cfg["fees"].get("use_collection_fees", True):
+            marketplace_bps = inputs.marketplace_bps
+            royalties_bps = inputs.royalties_bps
+        else:
+            marketplace_bps = None
+            royalties_bps = None
+
+        marketplace_bps = (
+            marketplace_bps if marketplace_bps is not None else self.cfg["fees"]["default_marketplace_bps"]
+        )
+        royalties_bps = royalties_bps if royalties_bps is not None else self.cfg["fees"]["default_royalties_bps"]
+
         net = expected_net_pnl(
             bid_price=bid_price,
             expected_exit_price=expected_exit,
@@ -94,7 +108,7 @@ class DecisionEngine:
             reconciliation_healthy=reconciliation_healthy,
             wallet_sufficient=wallet_sufficient,
         )
-        flags = evaluate_hard_gates(risk_ctx)
+        flags = evaluate_hard_gates(risk_ctx) + budget_flags
         action = "PLACE_BID" if not flags else "DO_NOTHING"
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -108,6 +122,7 @@ class DecisionEngine:
             "rationale": "all_hard_gates_passed" if action == "PLACE_BID" else "blocked_by_hard_gates",
             "risk_flags": flags,
             "next_check_sec": self.cfg["throttling"]["scheduler_cycle_sec"],
-            "bid_price": round(max(0.0, bid_price), 6),
+            "bid_price": round(bid_price, 6),
+            "bid_budget_cap_eth": bid_budget_cap,
             "fees_bps": {"marketplace": marketplace_bps, "royalties": royalties_bps},
         }

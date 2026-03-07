@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 from src.client.auth import AuthConfig, OpenSeaAuth
-from src.client.opensea_client import OpenSeaClient
+from src.client.opensea_client import OpenSeaClient, OpenSeaClientError
 from src.client.rate_limiter import SlidingWindowRateLimiter
 from src.core.decision_engine import DecisionEngine, MarketInputs
 from src.core.reconciliation import Reconciler
@@ -27,6 +27,8 @@ def _to_float_list(values: list[Any], key: str | None = None) -> list[float]:
     out: list[float] = []
     for value in values:
         raw = value if key is None else value.get(key)
+        if isinstance(raw, dict):
+            raw = raw.get("eth") or raw.get("quantity")
         try:
             out.append(float(raw))
         except (TypeError, ValueError):
@@ -82,6 +84,10 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
     )
 
 
+def _market_data_healthy(market: MarketInputs) -> bool:
+    return bool(market.recent_sales and market.floor_asks and market.floor_bids)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default=os.getenv("AGENT_CONFIG_PATH", "config/agent.yaml"))
@@ -108,11 +114,42 @@ def main() -> None:
     reconciler = Reconciler(storage)
     decision_engine = DecisionEngine(cfg)
 
-    market = market_from_opensea(client, cfg["collections"]["allowlist"][0], cfg)
+    slug = cfg["collections"]["allowlist"][0]
+    try:
+        market = market_from_opensea(client, slug, cfg)
+    except OpenSeaClientError as exc:
+        if cfg["mode"] == "live":
+            raise RuntimeError(f"live_launch_blocked_market_ingest_failed={exc}") from exc
+        market = MarketInputs(
+            collection_slug=slug,
+            verified=False,
+            recent_sales=[],
+            floor_asks=[],
+            floor_bids=[],
+            short_drift=0.0,
+            sales_velocity=0.0,
+            liquidity_score=0.0,
+            rank_in_ask_ladder=1,
+            rank_in_book=1,
+            local_depth=0,
+            inventory_age_sec=0,
+        )
+
     if cfg["mode"] == "paper":
         PaperRunner(cfg, decision_engine, order_manager, storage, reconciler).run_once(market, wallet_sufficient=True)
-    else:
-        LiveRunner(cfg, client, decision_engine, order_manager, storage, reconciler).cycle(market)
+        return
+
+    if not _market_data_healthy(market):
+        raise RuntimeError("live_launch_blocked_market_data_unavailable")
+
+    live_runner = LiveRunner(cfg, client, decision_engine, order_manager, storage, reconciler)
+    live_runner.reconcile_account_state()
+    if not live_runner.reconciler.health().healthy:
+        raise RuntimeError("live_launch_blocked_reconciliation_unhealthy")
+    if not live_runner.check_wallet_balance():
+        raise RuntimeError("live_launch_blocked_wallet_balance_insufficient")
+
+    live_runner.cycle(market)
 
 
 if __name__ == "__main__":

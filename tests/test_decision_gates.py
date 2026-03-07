@@ -5,7 +5,7 @@ def cfg() -> dict:
     return {
         "size_controls": {"bid_size_eth": 0.01, "max_open_inventory": 1},
         "pricing": {"edge_buffer_pct": 0.02, "max_bid_price_eth": 0.02, "velocity_norm_denominator": 100},
-        "fees": {"default_marketplace_bps": 250, "default_royalties_bps": 500},
+        "fees": {"use_collection_fees": True, "default_marketplace_bps": 250, "default_royalties_bps": 500},
         "gas": {"per_trade_eth": 0.0008},
         "risk": {"staircase_drop_pct": 0.07},
         "throttling": {"scheduler_cycle_sec": 30},
@@ -75,3 +75,27 @@ def test_dynamic_fees_used_in_expected_pnl() -> None:
     decision = engine.evaluate(inputs, inventory_count=0, reconciliation_healthy=True, wallet_sufficient=True)
     assert decision["fees_bps"]["marketplace"] == 0
     assert decision["fees_bps"]["royalties"] == 0
+
+
+def test_bid_size_is_budget_cap_not_price_target() -> None:
+    engine = DecisionEngine(cfg())
+    inputs = MarketInputs(
+        collection_slug="abc",
+        verified=True,
+        recent_sales=[0.05, 0.052, 0.051, 0.053, 0.054],
+        floor_asks=[0.06, 0.061],
+        floor_bids=[0.019, 0.018],
+        short_drift=0.02,
+        sales_velocity=0.8,
+        liquidity_score=0.9,
+        rank_in_ask_ladder=1,
+        rank_in_book=1,
+        local_depth=10,
+        inventory_age_sec=0,
+        marketplace_bps=0,
+        royalties_bps=0,
+    )
+    decision = engine.evaluate(inputs, inventory_count=0, reconciliation_healthy=True, wallet_sufficient=True)
+    assert decision["bid_price"] > decision["bid_budget_cap_eth"]
+    assert "bid_exceeds_budget_cap" in decision["risk_flags"]
+    assert decision["action"] == "DO_NOTHING"
