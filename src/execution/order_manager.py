@@ -13,6 +13,7 @@ from src.execution.signer import Signer
 from src.storage.storage import Storage
 
 logger = logging.getLogger(__name__)
+ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
 
 @dataclass
@@ -68,9 +69,15 @@ class OrderManager:
         end = now + 3600
         price_wei = int(self._wei(float(payload["price_eth"])))
         collection = str(payload.get("collection", ""))
-        token_id = str(payload.get("token_id", "0"))
-        collection_contract = str(payload.get("collection_contract", "0x0000000000000000000000000000000000000000"))
-        wrapped_native = str(payload.get("payment_token", "0x0000000000000000000000000000000000000000"))
+        token_id_raw = payload.get("token_id")
+        collection_contract = str(payload.get("collection_contract", "")).strip()
+        if not collection_contract or collection_contract.lower() == ZERO_ADDRESS:
+            raise ValueError("invalid_order_payload_missing_collection_contract")
+        if token_id_raw is None or str(token_id_raw).strip() == "":
+            raise ValueError("invalid_order_payload_missing_token_id")
+        token_id = str(token_id_raw)
+
+        wrapped_native = str(payload.get("payment_token", ZERO_ADDRESS))
 
         offer_item = {
             "itemType": 1,
@@ -174,6 +181,8 @@ class OrderManager:
     def build_offer_payload(
         self,
         collection_slug: str,
+        collection_contract: str,
+        token_id: str,
         price_eth: float,
         wallet: str,
         fee_recipients: list[dict[str, Any]] | None = None,
@@ -183,6 +192,8 @@ class OrderManager:
             wallet,
             {
                 "collection": collection_slug,
+                "collection_contract": collection_contract,
+                "token_id": token_id,
                 "price_eth": price_eth,
             },
             fee_recipients=fee_recipients,
@@ -192,6 +203,7 @@ class OrderManager:
         self,
         token_id: str,
         collection_slug: str,
+        collection_contract: str,
         price_eth: float,
         wallet: str,
         fee_recipients: list[dict[str, Any]] | None = None,
@@ -202,6 +214,7 @@ class OrderManager:
             {
                 "token_id": token_id,
                 "collection": collection_slug,
+                "collection_contract": collection_contract,
                 "price_eth": price_eth,
             },
             fee_recipients=fee_recipients,

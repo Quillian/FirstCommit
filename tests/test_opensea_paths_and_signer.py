@@ -38,9 +38,21 @@ def test_endpoint_paths_constructed_from_chain_protocol(tmp_path) -> None:
         ExecutionConfig(mode="paper", dry_run=True, write_enabled=False, chain="ethereum", protocol="seaport"),
     )
 
-    offer_payload = manager.build_offer_payload("cool", 0.01, "0x0000000000000000000000000000000000000001")
+    offer_payload = manager.build_offer_payload(
+        "cool",
+        "0x00000000000000000000000000000000000000cc",
+        "1",
+        0.01,
+        "0x0000000000000000000000000000000000000001",
+    )
     manager.create_offer(offer_payload)
-    listing_payload = manager.build_listing_payload("1", "cool", 0.02, "0x0000000000000000000000000000000000000001")
+    listing_payload = manager.build_listing_payload(
+        "1",
+        "cool",
+        "0x00000000000000000000000000000000000000cc",
+        0.02,
+        "0x0000000000000000000000000000000000000001",
+    )
     manager.create_listing(listing_payload)
     manager.cancel_order("0xhash")
     client.fulfill_listing({"listing": {}}, chain="ethereum", protocol="seaport")
@@ -63,8 +75,24 @@ def test_live_create_paths(tmp_path) -> None:
     )
 
     manager._attach_signature = lambda payload: {**payload, "signature": "0xsig"}  # type: ignore
-    manager.create_offer(manager.build_offer_payload("cool", 0.01, "0x0000000000000000000000000000000000000001"))
-    manager.create_listing(manager.build_listing_payload("1", "cool", 0.02, "0x0000000000000000000000000000000000000001"))
+    manager.create_offer(
+        manager.build_offer_payload(
+            "cool",
+            "0x00000000000000000000000000000000000000cc",
+            "1",
+            0.01,
+            "0x0000000000000000000000000000000000000001",
+        )
+    )
+    manager.create_listing(
+        manager.build_listing_payload(
+            "1",
+            "cool",
+            "0x00000000000000000000000000000000000000cc",
+            0.02,
+            "0x0000000000000000000000000000000000000001",
+        )
+    )
     manager.cancel_order("0xhash")
 
     assert any(m == "POST" and p == "/orders/ethereum/seaport/offers" for (m, p, _, _) in client.calls)
@@ -85,6 +113,8 @@ def test_order_payload_includes_fee_recipients(tmp_path) -> None:
 
     payload = manager.build_offer_payload(
         "cool",
+        "0x00000000000000000000000000000000000000cc",
+        "1",
         1.0,
         "0x0000000000000000000000000000000000000001",
         fee_recipients=[
@@ -114,8 +144,61 @@ def test_order_payload_is_seaport_components(tmp_path) -> None:
         ExecutionConfig(mode="paper", dry_run=True, write_enabled=False, chain="ethereum", protocol="seaport"),
     )
 
-    payload = manager.build_offer_payload("cool", 0.01, "0x0000000000000000000000000000000000000001")
+    payload = manager.build_offer_payload(
+        "cool",
+        "0x00000000000000000000000000000000000000cc",
+        "123",
+        0.01,
+        "0x0000000000000000000000000000000000000001",
+    )
     params = payload["protocol_data"]["parameters"]
     assert "offer" in params and "consideration" in params
     assert params["offer"][0]["startAmount"].isdigit()
     assert "eip712" not in payload
+
+
+def test_offer_and_listing_payload_require_real_asset_identity(tmp_path) -> None:
+    client = CapturingClient()
+    storage = Storage(str(tmp_path / "db.sqlite3"))
+    manager = OrderManager(
+        client,
+        Signer(None),
+        storage,
+        ExecutionConfig(mode="paper", dry_run=True, write_enabled=False, chain="ethereum", protocol="seaport"),
+    )
+
+    with pytest.raises(ValueError, match="invalid_order_payload_missing_collection_contract"):
+        manager.build_offer_payload("cool", "0x0000000000000000000000000000000000000000", "10", 0.01, "0x1")
+
+    with pytest.raises(ValueError, match="invalid_order_payload_missing_token_id"):
+        manager.build_listing_payload("", "cool", "0x00000000000000000000000000000000000000cc", 0.01, "0x1")
+
+
+def test_offer_and_listing_payload_include_real_contract_and_token(tmp_path) -> None:
+    client = CapturingClient()
+    storage = Storage(str(tmp_path / "db.sqlite3"))
+    manager = OrderManager(
+        client,
+        Signer(None),
+        storage,
+        ExecutionConfig(mode="paper", dry_run=True, write_enabled=False, chain="ethereum", protocol="seaport"),
+    )
+
+    contract = "0x00000000000000000000000000000000000000cc"
+    token_id = "1234"
+    offer_payload = manager.build_offer_payload("cool", contract, token_id, 0.02, "0x0000000000000000000000000000000000000001")
+    listing_payload = manager.build_listing_payload(
+        token_id,
+        "cool",
+        contract,
+        0.02,
+        "0x0000000000000000000000000000000000000001",
+    )
+
+    offer_consideration_nft = offer_payload["protocol_data"]["parameters"]["consideration"][0]
+    listing_offer_nft = listing_payload["protocol_data"]["parameters"]["offer"][0]
+
+    assert offer_consideration_nft["token"] == contract
+    assert offer_consideration_nft["identifierOrCriteria"] == token_id
+    assert listing_offer_nft["token"] == contract
+    assert listing_offer_nft["identifierOrCriteria"] == token_id

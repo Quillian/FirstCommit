@@ -41,7 +41,15 @@ class PaperRunner:
         )
         if decision["action"] == "PLACE_BID":
             self.sm.advance("bid_submitted")
-            payload = self.order_manager.build_offer_payload(market.collection_slug, decision["bid_price"], "paper_wallet")
+            if not market.target_collection_contract or not market.target_token_id:
+                raise ValueError("paper_run_missing_target_asset_identity")
+            payload = self.order_manager.build_offer_payload(
+                market.collection_slug,
+                market.target_collection_contract,
+                market.target_token_id,
+                decision["bid_price"],
+                "paper_wallet",
+            )
             result = self.order_manager.create_offer(payload)
             decision["write_result"] = result
         else:
