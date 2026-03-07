@@ -91,6 +91,47 @@ def test_cycle_persists_final_blocked_decision_when_target_asset_identity_missin
     assert order_manager.called is False
 
 
+
+def test_extract_asset_identity_preserves_numeric_zero_token_id() -> None:
+    contract, token_id = _extract_asset_identity(
+        {
+            "listings": [
+                {
+                    "contract": "0x00000000000000000000000000000000000000cc",
+                    "token_id": 0,
+                }
+            ]
+        }
+    )
+
+    assert contract == "0x00000000000000000000000000000000000000cc"
+    assert token_id == "0"
+
+
+def test_extract_asset_identity_ignores_placeholder_identifier_values() -> None:
+    contract, token_id = _extract_asset_identity(
+        {
+            "listings": [
+                {
+                    "contract": "0x00000000000000000000000000000000000000cc",
+                    "token_id": None,
+                    "identifier": {},
+                    "asset": {"token_id": []},
+                },
+                {
+                    "contract": "0x00000000000000000000000000000000000000dd",
+                    "token_id": False,
+                    "identifier": "   ",
+                    "asset": {"token_id": {}},
+                },
+            ]
+        }
+    )
+
+    assert contract is None
+    assert token_id is None
+
+
 def test_extract_asset_identity_accepts_numeric_zero_token_id() -> None:
     contract, token_id = _extract_asset_identity(
         {

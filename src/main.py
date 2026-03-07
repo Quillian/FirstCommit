@@ -61,11 +61,20 @@ def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str
 
 
 def _extract_asset_identity(*payloads: dict[str, Any]) -> tuple[str | None, str | None]:
+    def _is_invalid_placeholder(candidate: Any) -> bool:
+        if candidate is None:
+            return True
+        if isinstance(candidate, bool):
+            return True
+        if isinstance(candidate, str):
+            return candidate.strip() == ""
+        if isinstance(candidate, (dict, list, tuple, set)):
+            return True
+        return False
+
     def _pick_value(*candidates: Any) -> Any:
         for candidate in candidates:
-            if candidate is None:
-                continue
-            if isinstance(candidate, str) and candidate.strip() == "":
+            if _is_invalid_placeholder(candidate):
                 continue
             return candidate
         return None
