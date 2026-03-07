@@ -34,8 +34,11 @@ class OpenSeaClient:
     ) -> None:
         normalized = base_url.rstrip("/")
         if normalized.endswith("/api/v2"):
-            normalized = normalized[: -len("/api/v2")]
-        self.base_url = normalized
+            self.base_url = normalized
+            self.root_url = normalized[: -len("/api/v2")]
+        else:
+            self.base_url = f"{normalized}/api/v2"
+            self.root_url = normalized
         self.auth = auth
         self.rate_limiter = rate_limiter
         self.timeout_sec = timeout_sec
@@ -55,11 +58,13 @@ class OpenSeaClient:
         path: str,
         payload: Optional[Dict[str, Any]] = None,
         query: Optional[Dict[str, Any]] = None,
+        use_api_v2: bool = True,
     ) -> Dict[str, Any]:
         self.rate_limiter.wait()
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
         query_string = f"?{urlencode(query)}" if query else ""
-        url = f"{self.base_url}{path}{query_string}"
+        request_base = self.base_url if use_api_v2 else self.root_url
+        url = f"{request_base}{path}{query_string}"
         last_error: Exception | None = None
 
         for attempt in range(1, self.retry_attempts + 1):

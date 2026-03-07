@@ -106,7 +106,15 @@ def test_live_create_paths(tmp_path) -> None:
 def test_client_normalizes_base_url_and_avoids_duplicate_api_v2() -> None:
     client = OpenSeaClient("https://example.com/api/v2", DummyAuth(), DummyLimiter())
 
-    assert client.base_url == "https://example.com"
+    assert client.base_url == "https://example.com/api/v2"
+    assert client.root_url == "https://example.com"
+
+
+def test_client_appends_api_v2_when_missing() -> None:
+    client = OpenSeaClient("https://example.com", DummyAuth(), DummyLimiter())
+
+    assert client.base_url == "https://example.com/api/v2"
+    assert client.root_url == "https://example.com"
 
 
 
