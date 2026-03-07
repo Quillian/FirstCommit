@@ -134,17 +134,16 @@ class LiveRunner:
                 decision["action"] = "DO_NOTHING"
                 decision["rationale"] = "blocked_missing_target_asset_identity"
                 decision.setdefault("risk_flags", []).append("missing_target_asset_identity")
-                self.storage.log_decision(market.collection_slug, decision)
-                return decision
-            payload = self.order_manager.build_offer_payload(
-                market.collection_slug,
-                market.target_collection_contract,
-                market.target_token_id,
-                decision["bid_price"],
-                os.getenv("WALLET_ADDRESS", ""),
-                fee_recipients=market.fee_recipients,
-            )
-            decision["offer_result"] = self.order_manager.create_offer(payload)
+            else:
+                payload = self.order_manager.build_offer_payload(
+                    market.collection_slug,
+                    market.target_collection_contract,
+                    market.target_token_id,
+                    decision["bid_price"],
+                    os.getenv("WALLET_ADDRESS", ""),
+                    fee_recipients=market.fee_recipients,
+                )
+                decision["offer_result"] = self.order_manager.create_offer(payload)
 
         self.storage.log_decision(market.collection_slug, decision)
         return decision
