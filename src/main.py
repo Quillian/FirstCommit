@@ -28,6 +28,17 @@ def _to_float(raw: Any) -> float | None:
         current = raw.get("current")
         if isinstance(current, dict):
             raw = current
+
+        decimals = raw.get("decimals") if isinstance(raw, dict) else None
+        value = raw.get("value") if isinstance(raw, dict) else None
+        if value is not None:
+            try:
+                as_float = float(value)
+                if isinstance(decimals, int) and decimals >= 0:
+                    return as_float / (10 ** decimals)
+            except (TypeError, ValueError):
+                pass
+
         for candidate in (
             raw.get("eth"),
             raw.get("quantity"),
