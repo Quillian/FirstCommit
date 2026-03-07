@@ -162,6 +162,9 @@ def test_live_fee_guard_blocks_when_dynamic_fees_missing(monkeypatch, tmp_path) 
         main.main()
 
 
+def test_to_float_preserves_decimal_scaling_for_value_objects() -> None:
+    assert main._to_float({"value": "1000000000000000000", "decimals": 18}) == 1.0
+
 def test_market_from_opensea_supports_new_payload_shapes() -> None:
     class NewShapeClient(FakeClient):
         def get_collection_details(self, slug: str):
