@@ -87,7 +87,12 @@ def _first_by_path(container: Any, *paths: tuple[str, ...]) -> Any:
 
 
 def _extract_fee_bps(collection_details: dict[str, Any]) -> tuple[int | None, int | None]:
-    fees = _first_by_path(collection_details, ("fees",), ("collection", "fees")) or {}
+    fees = _first_by_path(
+        collection_details,
+        ("fees",),
+        ("collection", "fees"),
+        ("collection", "details", "collection", "fees"),
+    ) or {}
     opensea_fees = fees.get("opensea_fees") or []
     seller_fees = fees.get("seller_fees") or []
 
@@ -118,7 +123,12 @@ def _extract_fee_bps(collection_details: dict[str, Any]) -> tuple[int | None, in
 
 
 def _extract_fee_recipients(collection_details: dict[str, Any]) -> list[dict[str, Any]]:
-    fees = _first_by_path(collection_details, ("fees",), ("collection", "fees")) or {}
+    fees = _first_by_path(
+        collection_details,
+        ("fees",),
+        ("collection", "fees"),
+        ("collection", "details", "collection", "fees"),
+    ) or {}
     recipients: list[dict[str, Any]] = []
     for bucket in (fees.get("opensea_fees") or {}, fees.get("seller_fees") or {}):
         rows = bucket.values() if isinstance(bucket, dict) else bucket

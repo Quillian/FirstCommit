@@ -222,11 +222,15 @@ def test_market_from_opensea_uses_hardened_payload_fallbacks() -> None:
             self.called.append("details")
             return {
                 "collection": {
-                    "details": {"collection": {"safelist_status": "verified"}},
-                    "fees": {
-                        "opensea_fees": [{"basis_points": 250, "address": "0x00000000000000000000000000000000000000aa"}],
-                        "seller_fees": [{"bps": 500, "recipient": "0x00000000000000000000000000000000000000bb"}],
-                    },
+                    "details": {
+                        "collection": {
+                            "safelist_status": "verified",
+                            "fees": {
+                                "opensea_fees": [{"basis_points": 250, "address": "0x00000000000000000000000000000000000000aa"}],
+                                "seller_fees": [{"bps": 500, "recipient": "0x00000000000000000000000000000000000000bb"}],
+                            },
+                        }
+                    }
                 }
             }
 
