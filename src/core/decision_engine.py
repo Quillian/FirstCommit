@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -27,6 +27,7 @@ class MarketInputs:
     inventory_age_sec: int
     marketplace_bps: int | None = None
     royalties_bps: int | None = None
+    fee_recipients: list[dict[str, Any]] = field(default_factory=list)
 
 
 class DecisionEngine:

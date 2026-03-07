@@ -131,7 +131,12 @@ class LiveRunner:
         self.storage.log_decision(market.collection_slug, decision)
 
         if decision["action"] == "PLACE_BID":
-            payload = self.order_manager.build_offer_payload(market.collection_slug, decision["bid_price"], os.getenv("WALLET_ADDRESS", ""))
+            payload = self.order_manager.build_offer_payload(
+                market.collection_slug,
+                decision["bid_price"],
+                os.getenv("WALLET_ADDRESS", ""),
+                fee_recipients=market.fee_recipients,
+            )
             decision["offer_result"] = self.order_manager.create_offer(payload)
 
         return decision

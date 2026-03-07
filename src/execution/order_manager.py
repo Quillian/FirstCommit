@@ -6,6 +6,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from src.client.opensea_client import OpenSeaClient
 from src.execution.signer import Signer
@@ -49,13 +50,23 @@ class OrderManager:
         canonical = json.dumps(payload, sort_keys=True).encode("utf-8")
         return f"drysig_{hashlib.sha256(canonical).hexdigest()}"
 
-    def _seaport_order_shell(self, side: str, wallet: str, payload: dict[str, object]) -> dict[str, object]:
+    @staticmethod
+    def _fee_amount_wei(price_wei: int, bps: int) -> int:
+        return int((price_wei * max(bps, 0)) / 10_000)
+
+    def _seaport_order_shell(
+        self,
+        side: str,
+        wallet: str,
+        payload: dict[str, Any],
+        fee_recipients: list[dict[str, Any]] | None = None,
+    ) -> dict[str, object]:
         if payload.get("price_eth", 0) <= 0:
             raise ValueError("invalid_order_payload_price")
 
         now = int(time.time())
         end = now + 3600
-        price_wei = self._wei(float(payload["price_eth"]))
+        price_wei = int(self._wei(float(payload["price_eth"])))
         collection = str(payload.get("collection", ""))
         token_id = str(payload.get("token_id", "0"))
         collection_contract = str(payload.get("collection_contract", "0x0000000000000000000000000000000000000000"))
@@ -65,17 +76,44 @@ class OrderManager:
             "itemType": 1,
             "token": wrapped_native,
             "identifierOrCriteria": "0",
-            "startAmount": price_wei,
-            "endAmount": price_wei,
+            "startAmount": str(price_wei),
+            "endAmount": str(price_wei),
         }
-        consideration_item = {
-            "itemType": 2,
-            "token": collection_contract,
-            "identifierOrCriteria": token_id,
-            "startAmount": "1",
-            "endAmount": "1",
-            "recipient": wallet,
-        }
+        fee_recipients = fee_recipients or []
+        fee_items: list[dict[str, str]] = []
+        total_fee_wei = 0
+        for fee in fee_recipients:
+            recipient = str(fee.get("recipient", "")).strip()
+            bps = int(fee.get("bps", 0))
+            if not recipient or bps <= 0:
+                continue
+            fee_amount = self._fee_amount_wei(price_wei, bps)
+            if fee_amount <= 0:
+                continue
+            total_fee_wei += fee_amount
+            fee_items.append(
+                {
+                    "itemType": 1,
+                    "token": wrapped_native,
+                    "identifierOrCriteria": "0",
+                    "startAmount": str(fee_amount),
+                    "endAmount": str(fee_amount),
+                    "recipient": recipient,
+                }
+            )
+
+        seller_proceeds_wei = max(price_wei - total_fee_wei, 0)
+
+        consideration: list[dict[str, str]] = [
+            {
+                "itemType": 2,
+                "token": collection_contract,
+                "identifierOrCriteria": token_id,
+                "startAmount": "1",
+                "endAmount": "1",
+                "recipient": wallet,
+            }
+        ]
 
         if side == "listing":
             offer_item = {
@@ -85,14 +123,30 @@ class OrderManager:
                 "startAmount": "1",
                 "endAmount": "1",
             }
-            consideration_item = {
-                "itemType": 1,
-                "token": wrapped_native,
-                "identifierOrCriteria": "0",
-                "startAmount": price_wei,
-                "endAmount": price_wei,
-                "recipient": wallet,
-            }
+            consideration = [
+                {
+                    "itemType": 1,
+                    "token": wrapped_native,
+                    "identifierOrCriteria": "0",
+                    "startAmount": str(seller_proceeds_wei),
+                    "endAmount": str(seller_proceeds_wei),
+                    "recipient": wallet,
+                },
+                *fee_items,
+            ]
+        else:
+            if seller_proceeds_wei > 0:
+                consideration.append(
+                    {
+                        "itemType": 1,
+                        "token": wrapped_native,
+                        "identifierOrCriteria": "0",
+                        "startAmount": str(seller_proceeds_wei),
+                        "endAmount": str(seller_proceeds_wei),
+                        "recipient": str(payload.get("seller_recipient", wallet)),
+                    }
+                )
+            consideration.extend(fee_items)
 
         return {
             "chain": self.cfg.chain,
@@ -105,7 +159,7 @@ class OrderManager:
                     "offerer": wallet,
                     "zone": "0x0000000000000000000000000000000000000000",
                     "offer": [offer_item],
-                    "consideration": [consideration_item],
+                    "consideration": consideration,
                     "orderType": 0,
                     "startTime": str(now),
                     "endTime": str(end),
@@ -117,7 +171,13 @@ class OrderManager:
             },
         }
 
-    def build_offer_payload(self, collection_slug: str, price_eth: float, wallet: str) -> dict[str, object]:
+    def build_offer_payload(
+        self,
+        collection_slug: str,
+        price_eth: float,
+        wallet: str,
+        fee_recipients: list[dict[str, Any]] | None = None,
+    ) -> dict[str, object]:
         return self._seaport_order_shell(
             "offer",
             wallet,
@@ -125,9 +185,17 @@ class OrderManager:
                 "collection": collection_slug,
                 "price_eth": price_eth,
             },
+            fee_recipients=fee_recipients,
         )
 
-    def build_listing_payload(self, token_id: str, collection_slug: str, price_eth: float, wallet: str) -> dict[str, object]:
+    def build_listing_payload(
+        self,
+        token_id: str,
+        collection_slug: str,
+        price_eth: float,
+        wallet: str,
+        fee_recipients: list[dict[str, Any]] | None = None,
+    ) -> dict[str, object]:
         return self._seaport_order_shell(
             "listing",
             wallet,
@@ -136,6 +204,7 @@ class OrderManager:
                 "collection": collection_slug,
                 "price_eth": price_eth,
             },
+            fee_recipients=fee_recipients,
         )
 
     def _attach_signature(self, payload: dict[str, object]) -> dict[str, object]:
