@@ -32,7 +32,13 @@ class OpenSeaClient:
         timeout_sec: int = 10,
         retry_attempts: int = 3,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        normalized = base_url.rstrip("/")
+        if normalized.endswith("/api/v2"):
+            self.base_url = normalized
+            self.root_url = normalized[: -len("/api/v2")]
+        else:
+            self.base_url = f"{normalized}/api/v2"
+            self.root_url = normalized
         self.auth = auth
         self.rate_limiter = rate_limiter
         self.timeout_sec = timeout_sec
@@ -52,11 +58,13 @@ class OpenSeaClient:
         path: str,
         payload: Optional[Dict[str, Any]] = None,
         query: Optional[Dict[str, Any]] = None,
+        use_api_v2: bool = True,
     ) -> Dict[str, Any]:
         self.rate_limiter.wait()
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
         query_string = f"?{urlencode(query)}" if query else ""
-        url = f"{self.base_url}{path}{query_string}"
+        request_base = self.base_url if use_api_v2 else self.root_url
+        url = f"{request_base}{path}{query_string}"
         last_error: Exception | None = None
 
         for attempt in range(1, self.retry_attempts + 1):
@@ -125,10 +133,10 @@ class OpenSeaClient:
         return self._request("POST", f"/orders/{chain}/{protocol}/{order_hash}/cancel", payload={})
 
     def fulfill_listing(self, payload: Dict[str, Any], chain: str, protocol: str) -> Dict[str, Any]:
-        return self._request("POST", "/api/v2/listings/fulfillment_data", payload)
+        return self._request("POST", "/listings/fulfillment_data", payload)
 
     def fulfill_offer(self, payload: Dict[str, Any], chain: str, protocol: str) -> Dict[str, Any]:
-        return self._request("POST", "/api/v2/offers/fulfillment_data", payload)
+        return self._request("POST", "/offers/fulfillment_data", payload)
 
     def stream_integration_path(self) -> str:
         return "Use configured stream websocket URL with auth headers for future event-driven fills/listing deltas"

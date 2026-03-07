@@ -214,3 +214,54 @@ def test_market_from_opensea_supports_new_payload_shapes() -> None:
     assert market.marketplace_bps == 250
     assert market.royalties_bps == 500
     assert len(market.fee_recipients) == 2
+
+
+def test_market_from_opensea_uses_hardened_payload_fallbacks() -> None:
+    class HardenedPayloadClient(FakeClient):
+        def get_collection_details(self, slug: str):
+            self.called.append("details")
+            return {
+                "collection": {
+                    "details": {"collection": {"safelist_status": "verified"}},
+                    "fees": {
+                        "opensea_fees": [{"basis_points": 250, "address": "0x00000000000000000000000000000000000000aa"}],
+                        "seller_fees": [{"bps": 500, "recipient": "0x00000000000000000000000000000000000000bb"}],
+                    },
+                }
+            }
+
+        def get_collection_stats(self, slug: str):
+            self.called.append("stats")
+            return {"count": 8, "volume": 80}
+
+        def get_events_by_collection(self, slug: str):
+            self.called.append("events")
+            return {
+                "asset_events": [
+                    {
+                        "total_price": {
+                            "value": "1200000000000000000",
+                            "decimals": 18,
+                        }
+                    }
+                ]
+            }
+
+        def get_best_listings_by_collection(self, slug: str):
+            self.called.append("best_listings")
+            return {"listings": [{"starting_price": {"value": "1300000000000000000", "decimals": 18}}]}
+
+        def get_all_listings_by_collection(self, slug: str):
+            self.called.append("all_listings")
+            return {"listings": []}
+
+    cfg = {"pricing": {"velocity_norm_denominator": 100}}
+    market = main.market_from_opensea(HardenedPayloadClient(), "cool", cfg)
+
+    assert market.verified is True
+    assert market.recent_sales == [1.2]
+    assert market.floor_asks == [1.3]
+    assert market.sales_velocity == pytest.approx(0.08)
+    assert market.marketplace_bps == 250
+    assert market.royalties_bps == 500
+    assert len(market.fee_recipients) == 2
