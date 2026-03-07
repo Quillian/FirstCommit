@@ -17,7 +17,7 @@
     "protocol": "seaport"
   },
   "collections": {
-    "allowlist": ["doodles-official"],
+    "allowlist": ["warplets"],
     "require_verified": true
   },
   "size_controls": {

@@ -167,7 +167,7 @@ def test_market_from_opensea_supports_new_payload_shapes() -> None:
         def get_collection_details(self, slug: str):
             self.called.append("details")
             return {
-                "safelist_status": "approved",
+                "details": {"safelist_status": "approved"},
                 "fees": {
                     "opensea_fees": [
                         {"fee": 2.5, "address": "0x00000000000000000000000000000000000000aa"},

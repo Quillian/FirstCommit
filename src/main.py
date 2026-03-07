@@ -258,12 +258,14 @@ def market_from_opensea(client: OpenSeaClient, slug: str, cfg: dict[str, Any]) -
         verified=bool(
             _first_by_path(
                 details,
+                ("details", "safelist_status"),
                 ("collection", "safelist_status"),
                 ("safelist_status",),
                 ("collection", "verification_status"),
                 ("verification_status",),
                 ("collection", "is_verified"),
                 ("is_verified",),
+                ("collection", "details", "safelist_status"),
                 ("collection", "details", "collection", "safelist_status"),
             )
             in {"verified", "approved", "is_verified", True}

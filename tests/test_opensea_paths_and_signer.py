@@ -118,6 +118,33 @@ def test_client_appends_api_v2_when_missing() -> None:
 
 
 
+
+def test_request_normalizes_api_v2_prefixed_paths(monkeypatch) -> None:
+    client = OpenSeaClient("https://example.com/api/v2", DummyAuth(), DummyLimiter())
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    captured = {}
+
+    def fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        return _Resp()
+
+    monkeypatch.setattr("src.client.opensea_client.urlopen", fake_urlopen)
+
+    client._request("GET", "/api/v2/events/collection/cool", query={"event_type": "sale"})
+
+    assert captured["url"] == "https://example.com/api/v2/events/collection/cool?event_type=sale"
+
+
 def test_order_payload_includes_fee_recipients(tmp_path) -> None:
     client = CapturingClient()
     storage = Storage(str(tmp_path / "db.sqlite3"))

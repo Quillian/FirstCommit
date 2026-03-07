@@ -64,7 +64,10 @@ class OpenSeaClient:
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
         query_string = f"?{urlencode(query)}" if query else ""
         request_base = self.base_url if use_api_v2 else self.root_url
-        url = f"{request_base}{path}{query_string}"
+        normalized_path = path
+        if use_api_v2 and normalized_path.startswith("/api/v2/"):
+            normalized_path = normalized_path[len("/api/v2"):]
+        url = f"{request_base}{normalized_path}{query_string}"
         last_error: Exception | None = None
 
         for attempt in range(1, self.retry_attempts + 1):
